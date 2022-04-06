@@ -874,13 +874,22 @@ public:
     AMM::DDSManager <TCPBridgeListener> *mgr1 = new AMM::DDSManager<TCPBridgeListener>("config/tcp_bridge_ajams.xml",
                                                                                        "manikin_1");
 
-    AMM::DDSManager <TCPBridgeListener> *GetManikin1() {
+    AMM::DDSManager <TCPBridgeListener> *mgr2 = new AMM::DDSManager<TCPBridgeListener>("config/tcp_bridge_ajams.xml",
+                                                                                       "manikin_2");
+
+    AMM::DDSManager <TCPBridgeListener> *GetManikin(std::string m) {
+        if (m.compare("manikin_1") == 0) {
+            return mgr1;
+        } else if (m.compare("manikin_2") == 0) {
+            return mgr2;
+        }
         return mgr1;
     }
 
     void InitializeManikins() {
         LOG_INFO << "Initializing DDS managers for each manikin...";
         InitializeManager(mgr1, "manikin_1");
+        InitializeManager(mgr2, "manikin_2");
     }
 
     void InitializeManager(AMM::DDSManager <TCPBridgeListener> *tmgr, std::string manikin_id) {
@@ -967,7 +976,7 @@ void *Server::HandleClient(void *args) {
     int index;
     ssize_t n;
 
-    AMM::DDSManager <TCPBridgeListener> *tmgr = pod.GetManikin1();
+    AMM::DDSManager <TCPBridgeListener> *tmgr = pod.GetManikin("");
 
     std::string uuid = tmgr->GenerateUuidString();
 
@@ -1023,6 +1032,7 @@ void *Server::HandleClient(void *args) {
                         break;
                     }
                     std::string requestManikin = ExtractManikinIDFromString(str);
+                    tmgr = pod.GetManikin(requestManikin);
                     if (str.substr(0, modulePrefix.size()) == modulePrefix) {
                         std::string moduleName = str.substr(modulePrefix.size());
 
