@@ -574,6 +574,11 @@ public:
             } else if (value.find("END_SIMULATION") != std::string::npos) {
                 currentStatus = "NOT RUNNING";
                 isPaused = true;
+                AMM::SimulationControl simControl;
+                auto ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+                simControl.timestamp(ms);
+                simControl.type(AMM::ControlType::HALT);
+                mgr->WriteSimulationControl(simControl);
                 std::string tmsg = "ACT=END_SIMULATION_SIM;mid=" + manikin_id;
                 s->SendToAll(tmsg);
             }
