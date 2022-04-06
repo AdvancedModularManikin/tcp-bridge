@@ -301,6 +301,61 @@ public:
         }
     }
 
+    void onNewOmittedEvent(AMM::OmittedEvent &oe, SampleInfo_t *info) {
+        std::string location;
+        std::string practitioner;
+        std::string eType;
+        std::string eData;
+        std::string pType;
+
+        // Make a mock event record
+        AMM::EventRecord er;
+        er.id(oe.id());
+        er.location(oe.location());
+        er.agent_id(oe.agent_id());
+        er.type(oe.type());
+        er.timestamp(oe.timestamp());
+        er.agent_type(oe.agent_type());
+        er.data(oe.data());
+
+        LOG_DEBUG << "Received an omitted event record of type " << er.type()
+                  << " on DDS bus, so we're storing it in a simple map.";
+        eventRecords[er.id().id()] = er;
+        location = er.location().name();
+        practitioner = er.agent_id().id();
+        eType = er.type();
+        eData = er.data();
+        pType = AMM::Utility::EEventAgentTypeStr(er.agent_type());
+
+        std::ostringstream messageOut;
+
+        messageOut << "[AMM_OmittedEvent]"
+                   << "id=" << er.id().id() << ";"
+                   << "mid=" << manikin_id << ";"
+                   << "type=" << eType << ";"
+                   << "location=" << location << ";"
+                   << "participant_id=" << practitioner << ";"
+                   << "participant_type=" << pType << ";"
+                   << "data=" << eData << ";"
+                   << std::endl;
+        string stringOut = messageOut.str();
+
+        LOG_DEBUG << "Received an EventRecord via DDS, republishing to TCP clients: " << stringOut;
+
+        auto it = clientMap.begin();
+        while (it != clientMap.end()) {
+            std::string cid = it->first;
+            std::vector <std::string> subV = subscribedTopics[cid];
+            if (std::find(subV.begin(), subV.end(), "AMM_EventRecord") != subV.end()) {
+                Client *c = Server::GetClientByIndex(cid);
+                if (c) {
+                    Server::SendToClient(c, stringOut);
+                }
+            }
+            ++it;
+        }
+    }
+
     void onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
         std::string location;
         std::string practitioner;
@@ -581,8 +636,7 @@ public:
                 mgr->WriteSimulationControl(simControl);
                 std::string tmsg = "ACT=END_SIMULATION_SIM;mid=" + manikin_id;
                 s->SendToAll(tmsg);
-            }
-            else if (!value.compare(0, loadScenarioPrefix.size(), loadScenarioPrefix)) {
+            } else if (!value.compare(0, loadScenarioPrefix.size(), loadScenarioPrefix)) {
                 // currentScenario = value.substr(loadScenarioPrefix.size());
                 // sendConfigToAll(currentScenario);
                 // std::ostringstream messageOut;
@@ -848,6 +902,7 @@ public:
         tmgr->InitializeOperationalDescription();
         tmgr->InitializeModuleConfiguration();
         tmgr->InitializeStatus();
+        tmgr->InitializeOmittedEvent();
 
         tmgr->CreateOperationalDescriptionPublisher();
         tmgr->CreateModuleConfigurationPublisher();
@@ -861,6 +916,7 @@ public:
         tmgr->CreateRenderModificationSubscriber(&tl, &TCPBridgeListener::onNewRenderModification);
         tmgr->CreatePhysiologyModificationSubscriber(&tl, &TCPBridgeListener::onNewPhysiologyModification);
         tmgr->CreateEventRecordSubscriber(&tl, &TCPBridgeListener::onNewEventRecord);
+        tmgr->CreateOmittedEventSubscriber(&tl, &TCPBridgeListener::onNewOmittedEvent);
         tmgr->CreateOperationalDescriptionSubscriber(&tl, &TCPBridgeListener::onNewOperationalDescription);
         tmgr->CreateModuleConfigurationSubscriber(&tl, &TCPBridgeListener::onNewModuleConfiguration);
         tmgr->CreateRenderModificationPublisher();
@@ -879,15 +935,16 @@ TPMS_POD pod;
 std::string ExtractTypeFromRenderMod(std::string payload) {
     std::size_t pos = payload.find("type=");
     if (pos != std::string::npos) {
-        std::string p1 = payload.substr(pos+6);
+        std::string p1 = payload.substr(pos + 6);
         std::size_t pos2 = p1.find("\"");
         if (pos2 != std::string::npos) {
-            std::string p2 = p1.substr(0,pos2);
+            std::string p2 = p1.substr(0, pos2);
             return p2;
         }
     }
     return {};
 };
+
 std::string ExtractManikinIDFromString(std::string in) {
     std::size_t pos = in.find("mid=");
     if (pos != std::string::npos) {
