@@ -882,7 +882,7 @@ public:
             return mgr1;
         //} else if (m.compare("manikin_2") == 0) {
         //    return mgr2;
-        //}
+        }
         return mgr1;
     }
 
