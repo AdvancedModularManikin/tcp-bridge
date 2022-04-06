@@ -571,7 +571,13 @@ public:
                 simControl.type(AMM::ControlType::RESET);
                 mgr->WriteSimulationControl(simControl);
                 InitializeLabNodes();
-            } else if (!value.compare(0, loadScenarioPrefix.size(), loadScenarioPrefix)) {
+            } else if (value.find("END_SIMULATION") != std::string::npos) {
+                currentStatus = "NOT RUNNING";
+                isPaused = true;
+                std::string tmsg = "ACT=END_SIMULATION_SIM;mid=" + manikin_id;
+                s->SendToAll(tmsg);
+            }
+            else if (!value.compare(0, loadScenarioPrefix.size(), loadScenarioPrefix)) {
                 // currentScenario = value.substr(loadScenarioPrefix.size());
                 // sendConfigToAll(currentScenario);
                 // std::ostringstream messageOut;
@@ -865,6 +871,18 @@ public:
 
 TPMS_POD pod;
 
+std::string ExtractTypeFromRenderMod(std::string payload) {
+    std::size_t pos = payload.find("type=");
+    if (pos != std::string::npos) {
+        std::string p1 = payload.substr(pos+6);
+        std::size_t pos2 = p1.find("\"");
+        if (pos2 != std::string::npos) {
+            std::string p2 = p1.substr(0,pos2);
+            return p2;
+        }
+    }
+    return {};
+};
 std::string ExtractManikinIDFromString(std::string in) {
     std::size_t pos = in.find("mid=");
     if (pos != std::string::npos) {
@@ -1079,20 +1097,23 @@ void *Server::HandleClient(void *args) {
                         AMM::UUID erID;
                         auto eid = kvp.find("event_id");
                         if (eid != kvp.end()) {
+                            LOG_INFO << " Event record came in with an event ID so let's use it.";
                             erID.id(eid->second);
                         } else {
                             erID.id(tmgr->GenerateUuidString());
                         }
 
                         if (topic == "AMM_Render_Modification") {
-                            AMM::UUID erID;
-                            erID.id(tmgr->GenerateUuidString());
 
                             FMA_Location fma;
                             fma.name(modLocation);
 
                             AMM::UUID agentID;
                             agentID.id(modLearner);
+
+                            if (modType.empty()) {
+                                modType = ExtractTypeFromRenderMod(modPayload);
+                            };
 
                             AMM::EventRecord er;
                             er.id(erID);
