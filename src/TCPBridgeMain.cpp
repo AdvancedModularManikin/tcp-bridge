@@ -75,6 +75,8 @@ bool closed = false;
 std::map <std::string, std::vector<std::string>> subscribedTopics;
 std::map <std::string, std::vector<std::string>> publishedTopics;
 
+
+double BloodChemistry_BloodPH_val = 0.0f;
 std::map <std::string, std::map<std::string, double>> labNodes;
 std::map <std::string, std::map<std::string, std::string>> equipmentSettings;
 std::map <std::string, std::string> clientMap;
@@ -200,6 +202,7 @@ const std::string configFile = "config/tcp_bridge_amm.xml";
 AMM::DDSManager <TCPBridgeListener> *mgr = new AMM::DDSManager<TCPBridgeListener>(configFile);
 AMM::UUID m_uuid;
 
+
 /**
  * FastRTPS/DDS Listener for subscriptions
  */
@@ -234,6 +237,10 @@ public:
                 labNodes[outer_map_pair.first].end()) {
                 labNodes[outer_map_pair.first][n.name()] = n.value();
             }
+        }
+
+        if (n.name().compare("BloodChemistry_BloodPH_MOD") == 0) {
+            BloodChemistry_BloodPH_val = n.value();
         }
 
         auto it = clientMap.begin();
@@ -768,7 +775,11 @@ void DispatchRequest(Client *c, std::string const &request) {
             auto it = labNodes[str].begin();
             while (it != labNodes[str].end()) {
                 std::ostringstream messageOut;
-                messageOut << it->first << "=" << it->second << ":" << str << "|";
+                if (str.compare("ABG") == 0 && it->first.compare("") == 0) {
+                    messageOut << "BloodChemistry_BloodPH=" << BloodChemistry_BloodPH_val << "|";
+                } else {
+                    messageOut << it->first << "=" << it->second << ":" << str << "|";
+                }
                 Server::SendToClient(c, messageOut.str());
                 ++it;
             }
