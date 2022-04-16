@@ -9,7 +9,7 @@ set(
         Net/Server.cpp Net/Server.h
         Net/ServerThread.cpp Net/ServerThread.h
         Net/UdpDiscoveryServer.cpp Net/UdpDiscoveryServer.h
-)
+        Manikin.cpp Manikin.h TPMS.cpp TPMS.h bridge.h)
 
 add_executable(amm_tcp_bridge ${TCP_BRIDGE_MODULE_SOURCES})
 
