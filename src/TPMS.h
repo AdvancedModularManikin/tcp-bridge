@@ -1,6 +1,6 @@
 #pragma once
 
-#include "manikin.h"
+#include "Manikin.h"
 
 #include "bridge.h"
 
