@@ -27,10 +27,7 @@ Manikin::Manikin(std::string mid) {
     mgr->InitializeStatus();
     mgr->InitializeOmittedEvent();
 
-    mgr->CreateOperationalDescriptionPublisher();
-    mgr->CreateModuleConfigurationPublisher();
-    mgr->CreateStatusPublisher();
-    mgr->CreateEventRecordPublisher();
+
     mgr->CreatePhysiologyValueSubscriber(this, &Manikin::onNewPhysiologyValue);
     mgr->CreatePhysiologyWaveformSubscriber(this, &Manikin::onNewPhysiologyWaveform);
     mgr->CreateCommandSubscriber(this, &Manikin::onNewCommand);
@@ -42,6 +39,11 @@ Manikin::Manikin(std::string mid) {
     mgr->CreateOmittedEventSubscriber(this, &Manikin::onNewOmittedEvent);
     mgr->CreateOperationalDescriptionSubscriber(this, &Manikin::onNewOperationalDescription);
     mgr->CreateModuleConfigurationSubscriber(this, &Manikin::onNewModuleConfiguration);
+
+    mgr->CreateOperationalDescriptionPublisher();
+    mgr->CreateModuleConfigurationPublisher();
+    mgr->CreateStatusPublisher();
+    mgr->CreateEventRecordPublisher();
     mgr->CreateRenderModificationPublisher();
     mgr->CreatePhysiologyModificationPublisher();
     mgr->CreateSimulationControlPublisher();
@@ -57,6 +59,7 @@ void Manikin::SetServer(Server *srv) {
     s = srv;
 
 }
+
 
 Manikin::~Manikin() {
     mgr->Shutdown();

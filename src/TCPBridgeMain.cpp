@@ -182,12 +182,7 @@ void *Server::HandleClient(void *args) {
                         break;
                     }
                     std::string requestManikin = ExtractManikinIDFromString(str);
-                    Manikin *tmgr;
-                    if (requestManikin.compare("manikin_1") == 0) {
-                        tmgr = pod.mgr1;
-                    } else if (requestManikin.compare("manikin_2") == 0) {
-                        tmgr = pod.mgr2;
-                    }
+                    auto tmgr = pod.GetManikin(requestManikin);
                     if (str.substr(0, modulePrefix.size()) == modulePrefix) {
                         std::string moduleName = str.substr(modulePrefix.size());
 
@@ -395,7 +390,10 @@ void *Server::HandleClient(void *args) {
                             cmdInstance.message(message);
                             tmgr->mgr->WriteCommand(cmdInstance);
                         } else if (topic == "AMM_ModuleConfiguration") {
-
+                             AMM::ModuleConfiguration mc;
+                             mc.name(modType);
+                             mc.capabilities_configuration(modPayload);
+                            tmgr->mgr->WriteModuleConfiguration(mc);
                         } else {
                                 LOG_DEBUG << "Unknown topic: " << topic;
                             }
