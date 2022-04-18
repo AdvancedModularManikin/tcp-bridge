@@ -358,6 +358,10 @@ void *Server::HandleClient(void *args) {
                             AMM::UUID agentID;
                             agentID.id(modLearner);
 
+                            if (modType.empty()) {
+                                modType = ExtractTypeFromRenderMod(modPayload);
+                            };
+
                             AMM::EventRecord er;
                             er.id(erID);
                             er.location(fma);
