@@ -394,8 +394,11 @@ void *Server::HandleClient(void *args) {
                             AMM::Command cmdInstance;
                             cmdInstance.message(message);
                             tmgr->mgr->WriteCommand(cmdInstance);
+                        } else if (topic == "AMM_ModuleConfiguration") {
+
                         } else {
-                            LOG_DEBUG << "Unknown topic: " << topic;
+                                LOG_DEBUG << "Unknown topic: " << topic;
+                            }
                         }
                     } else if (str.substr(0, keepAlivePrefix.size()) == keepAlivePrefix) {
                         // keepalive, ignore it
@@ -407,9 +410,7 @@ void *Server::HandleClient(void *args) {
                 }
             }
         }
-    }
 
-    return nullptr;
 }
 
 void UdpDiscoveryThread() {

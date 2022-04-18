@@ -63,7 +63,7 @@ Manikin::~Manikin() {
 }
 
 void Manikin::onNewModuleConfiguration(AMM::ModuleConfiguration &mc, SampleInfo_t *info) {
-    LOG_INFO << "** Message came in on manikin " << manikin_id;
+    LOG_DEBUG << "[TPMS] Received a module config from manikin " << manikin_id;
     LOG_TRACE << "Module Configuration recieved for " << mc.name();
 
     auto it = clientMap.begin();
@@ -136,7 +136,7 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
 }
 
 void Manikin::onNewPhysiologyModification(AMM::PhysiologyModification &pm, SampleInfo_t *info) {
-    LOG_INFO << "** Message came in on manikin " << manikin_id;
+    LOG_DEBUG << "[TPMS] Received a phys mod from manikin " << manikin_id;
     std::string location;
     std::string practitioner;
 
@@ -194,8 +194,8 @@ void Manikin::onNewOmittedEvent(AMM::OmittedEvent &oe, SampleInfo_t *info) {
     er.agent_type(oe.agent_type());
     er.data(oe.data());
 
-    LOG_DEBUG << "Received an omitted event record of type " << er.type()
-              << " on DDS bus, so we're storing it in a simple map.";
+    LOG_DEBUG << "[TPMS] Received an omitted event record of type " << er.type()
+              << " from manikin " << manikin_id;
     eventRecords[er.id().id()] = er;
     location = er.location().name();
     practitioner = er.agent_id().id();
@@ -239,8 +239,8 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
     std::string eData;
     std::string pType;
 
-    LOG_DEBUG << "Received an event record of type " << er.type()
-              << " on DDS bus, so we're storing it in a simple map.";
+    LOG_DEBUG << "[TPMS] Received an event record of type " << er.type()
+              << " from manikin " << manikin_id;
     eventRecords[er.id().id()] = er;
     location = er.location().name();
     practitioner = er.agent_id().id();
@@ -282,7 +282,7 @@ void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo
     std::string practitioner;
     std::string eType;
 
-    LOG_INFO << "Assessment received on DDS bus";
+    LOG_INFO << "[TPMS] Assessment Message came in on manikin " << manikin_id;
     if (eventRecords.count(a.event_id().id()) > 0) {
         AMM::EventRecord er = eventRecords[a.event_id().id()];
         location = er.location().name();
@@ -321,7 +321,6 @@ void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo
 }
 
 void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleInfo_t *info) {
-    LOG_INFO << "** Message came in on manikin " << manikin_id;
     std::string location;
     std::string practitioner;
 
@@ -331,6 +330,8 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
         location = er.location().name();
         practitioner = er.agent_id().id();
     }
+
+    LOG_INFO << "[TPMS] Render mod Message came in on manikin " << manikin_id;
 
     std::ostringstream messageOut;
     std::string rendModPayload;
@@ -376,7 +377,7 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 
 void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleInfo_t *info) {
     bool doWriteTopic = false;
-
+    LOG_INFO << "[TPMS] Simulation control Message came in on manikin " << manikin_id;
     switch (simControl.type()) {
         case AMM::ControlType::RUN: {
             currentStatus = "RUNNING";
@@ -420,7 +421,8 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
 }
 
 void Manikin::onNewOperationalDescription(AMM::OperationalDescription &opD, SampleInfo_t *info) {
-    LOG_INFO << "** Message came in on manikin " << manikin_id;
+    LOG_INFO << "[TPMS] Operational Description Message came in on manikin " << manikin_id;
+
     LOG_INFO << "Operational description for module " << opD.name() << " / model " << opD.model();
 
     // [AMM_OperationalDescription]name=;description=;manufacturer=;model=;serial_number=;module_id=;module_version=;configuration_version=;AMM_version=;capabilities_configuration=(BASE64 ENCODED STRING - URLSAFE)
@@ -460,7 +462,7 @@ void Manikin::onNewOperationalDescription(AMM::OperationalDescription &opD, Samp
 }
 
 void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *info) {
-    LOG_INFO << "** Message came in on manikin " << manikin_id << ": " << c.message();
+    LOG_INFO << "[TPMS] Command Message came in on manikin " << manikin_id << ": " << c.message();
     if (!c.message().compare(0, sysPrefix.size(), sysPrefix)) {
         std::string value = c.message().substr(sysPrefix.size());
         if (value.find("START_SIM") != std::string::npos) {
