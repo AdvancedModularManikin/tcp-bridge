@@ -11,8 +11,8 @@ TPMS::~TPMS() {
 void TPMS::InitializeManikins() {
     mgr1 = new Manikin("manikin_1");
     mgr2 = new Manikin("manikin_2");
-    //mgr3 = new Manikin("manikin_3");
-    //mgr4 = new Manikin("manikin_4");
+    mgr3 = new Manikin("manikin_3");
+    mgr4 = new Manikin("manikin_4");
 }
 
 Manikin* TPMS::GetManikin(std::string mid) {

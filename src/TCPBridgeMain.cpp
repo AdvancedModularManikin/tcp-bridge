@@ -374,6 +374,10 @@ void *Server::HandleClient(void *args) {
                             physMod.type(modType);
                             physMod.data(modPayload);
                             tmgr->mgr->WritePhysiologyModification(physMod);
+
+                            LOG_INFO << "We sent a physMod of type " << physMod.type();
+                            LOG_INFO << "\tPayload was: " << physMod.data();
+
                         } else if (topic == "AMM_Assessment") {
                             FMA_Location fma;
                             fma.name(modLocation);
