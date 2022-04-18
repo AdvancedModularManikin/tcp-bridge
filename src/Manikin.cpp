@@ -334,8 +334,6 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
         practitioner = er.agent_id().id();
     }
 
-    LOG_INFO << "[TPMS] Render mod Message came in on manikin " << manikin_id;
-
     std::ostringstream messageOut;
     std::string rendModPayload;
     std::string rendModType;
@@ -359,7 +357,8 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
     string stringOut = messageOut.str();
 
     if (rendModPayload.find("START_OF") == std::string::npos) {
-        LOG_DEBUG << "Received a render mod via DDS, republishing to TCP clients: " << stringOut;
+        LOG_INFO << "[TPMS] Render mod Message came in on manikin " << manikin_id << ", republishing to TCP: "
+                 << stringOut;
     }
 
     auto it = clientMap.begin();
