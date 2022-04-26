@@ -275,6 +275,7 @@ void *Server::HandleClient(void *args) {
                         token, tokenList) {
                             size_t sep_pos = token.find_first_of("=");
                             std::string key = token.substr(0, sep_pos);
+                            boost::algorithm::to_lower(key);
                             std::string value = (sep_pos == std::string::npos ? "" : token.substr(
                                     sep_pos + 1,
                                     std::string::npos));

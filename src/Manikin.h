@@ -89,6 +89,23 @@ private:
     std::string currentState = "NONE";
     std::string currentStatus = "NOT RUNNING";
 
+
+    std::map<std::string, double> nodeDataStorage;
+
+    std::map<std::string, std::string> statusStorage = {{"STATUS",         "NOT RUNNING"},
+                                                        {"TICK",           "0"},
+                                                        {"TIME",           "0"},
+                                                        {"SCENARIO",       ""},
+                                                        {"STATE",          ""},
+                                                        {"AIR_SUPPLY",     ""},
+                                                        {"CLEAR_SUPPLY",   ""},
+                                                        {"BLOOD_SUPPLY",   ""},
+                                                        {"FLUIDICS_STATE", ""},
+                                                        {"BATTERY1",       ""},
+                                                        {"BATTERY2",       ""},
+                                                        {"EXT_POWER",      ""},
+                                                        {"IVARM_STATE",    ""}};
+
     bool isPaused = false;
 
 protected:
