@@ -306,6 +306,11 @@ void *Server::HandleClient(void *args) {
                             modLearner = participant_id->second;
                         }
 
+                        if ( modLearner.front() == '"' ) {
+                            modLearner.erase( 0, 1 ); // erase the first character
+                            modLearner.erase( modLearner.size() - 1 ); // erase the last character
+                        }
+
                         auto payload = kvp.find("payload");
                         if (payload != kvp.end()) {
                             modPayload = payload->second;
