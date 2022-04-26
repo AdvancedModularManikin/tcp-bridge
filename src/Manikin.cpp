@@ -207,6 +207,9 @@ void Manikin::onNewPhysiologyModification(AMM::PhysiologyModification &pm, Sampl
         AMM::EventRecord er = eventRecords[pm.event_id().id()];
         location = er.location().name();
         practitioner = er.agent_id().id();
+        if ( practitioner.front() != '"' ) {
+            practitioner = '\"' + practitioner + '\"';
+        }
     }
 
     std::ostringstream messageOut;
@@ -262,6 +265,11 @@ void Manikin::onNewOmittedEvent(AMM::OmittedEvent &oe, SampleInfo_t *info) {
     eventRecords[er.id().id()] = er;
     location = er.location().name();
     practitioner = er.agent_id().id();
+
+    if ( practitioner.front() != '"' ) {
+        practitioner = '\"' + practitioner + '\"';
+    }
+
     eType = er.type();
     eData = er.data();
     pType = AMM::Utility::EEventAgentTypeStr(er.agent_type());
@@ -307,6 +315,11 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
     eventRecords[er.id().id()] = er;
     location = er.location().name();
     practitioner = er.agent_id().id();
+
+    if ( practitioner.front() != '"' ) {
+        practitioner = '\"' + practitioner + '\"';
+    }
+
     eType = er.type();
     eData = er.data();
     pType = AMM::Utility::EEventAgentTypeStr(er.agent_type());
@@ -350,6 +363,11 @@ void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo
         AMM::EventRecord er = eventRecords[a.event_id().id()];
         location = er.location().name();
         practitioner = er.agent_id().id();
+
+        if ( practitioner.front() != '"' ) {
+            practitioner = '\"' + practitioner + '\"';
+        }
+
         eType = er.type();
     }
 
@@ -392,6 +410,10 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
         AMM::EventRecord er = eventRecords[rendMod.event_id().id()];
         location = er.location().name();
         practitioner = er.agent_id().id();
+
+        if ( practitioner.front() != '"' ) {
+            practitioner = '\"' + practitioner + '\"';
+        }
     }
 
     std::ostringstream messageOut;
