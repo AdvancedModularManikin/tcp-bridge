@@ -466,7 +466,7 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
             isPaused = false;
             LOG_INFO << "Message recieved; Run sim.";
             std::ostringstream tmsg;
-            tmsg << "ACT=START_SIM" << ";mid=" << manikin_id << std::endl;
+            tmsg << "[SYS]START_SIM" << ";mid=" << manikin_id << std::endl;
             s->SendToAll(tmsg.str());
             break;
         }
@@ -479,7 +479,7 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
             }
             LOG_INFO << "Message recieved; Halt sim";
             std::ostringstream tmsg;
-            tmsg << "ACT=PAUSE_SIM" << ";mid=" << manikin_id << std::endl;
+            tmsg << "[SYS]PAUSE_SIM" << ";mid=" << manikin_id << std::endl;
             s->SendToAll(tmsg.str());
             break;
         }
@@ -489,7 +489,7 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
             isPaused = false;
             LOG_INFO << "Message recieved; Reset sim";
             std::ostringstream tmsg;
-            tmsg << "ACT=RESET_SIM" << ";mid=" << manikin_id << std::endl;
+            tmsg << "[SYS]RESET_SIM" << ";mid=" << manikin_id << std::endl;
             s->SendToAll(tmsg.str());
             break;
         }
