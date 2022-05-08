@@ -16,6 +16,8 @@
 #include <boost/asio.hpp>
 #include <boost/thread.hpp>
 
+#include <boost/program_options.hpp>
+
 #include "Net/Client.h"
 #include "Net/Server.h"
 #include "Net/UdpDiscoveryServer.h"
@@ -39,13 +41,6 @@ using namespace eprosima::fastdds::dds;
 using namespace eprosima::fastrtps::rtps;
 
 Server *s;
-
-short discoveryPort = 8888;
-int bridgePort = 9015;
-
-// Daemonize by default
-int daemonize = 1;
-int discovery = 1;
 
 std::map <std::string, std::string> clientMap;
 std::map <std::string, std::string> clientTypeMap;
@@ -306,9 +301,9 @@ void *Server::HandleClient(void *args) {
                             modLearner = participant_id->second;
                         }
 
-                        if ( modLearner.front() == '"' ) {
-                            modLearner.erase( 0, 1 ); // erase the first character
-                            modLearner.erase( modLearner.size() - 1 ); // erase the last character
+                        if (modLearner.front() == '"') {
+                            modLearner.erase(0, 1); // erase the first character
+                            modLearner.erase(modLearner.size() - 1); // erase the last character
                         }
 
                         auto payload = kvp.find("payload");
@@ -404,32 +399,32 @@ void *Server::HandleClient(void *args) {
                             cmdInstance.message(message);
                             tmgr->mgr->WriteCommand(cmdInstance);
                         } else if (topic == "AMM_ModuleConfiguration") {
-                             AMM::ModuleConfiguration mc;
-                             mc.name(modType);
-                             mc.capabilities_configuration(modPayload);
+                            AMM::ModuleConfiguration mc;
+                            mc.name(modType);
+                            mc.capabilities_configuration(modPayload);
                             tmgr->mgr->WriteModuleConfiguration(mc);
                         } else {
-                                LOG_DEBUG << "Unknown topic: " << topic;
-                            }
+                            LOG_DEBUG << "Unknown topic: " << topic;
                         }
-                    } else if (str.substr(0, keepAlivePrefix.size()) == keepAlivePrefix) {
-                        // keepalive, ignore it
-                    } else {
-                        if (!boost::algorithm::ends_with(str, "Connected") && str.size() > 3) {
-                            LOG_ERROR << "Client " << c->id << " unknown message:" << str;
-                        }
+                    }
+                } else if (str.substr(0, keepAlivePrefix.size()) == keepAlivePrefix) {
+                    // keepalive, ignore it
+                } else {
+                    if (!boost::algorithm::ends_with(str, "Connected") && str.size() > 3) {
+                        LOG_ERROR << "Client " << c->id << " unknown message:" << str;
                     }
                 }
             }
         }
+    }
 
 }
 
-void UdpDiscoveryThread() {
-    if (discovery) {
+void UdpDiscoveryThread(short port, bool enabled) {
+    if (enabled) {
         boost::asio::io_service io_service;
-        UdpDiscoveryServer udps(io_service, discoveryPort);
-        LOG_INFO << "UDP Discovery listening on port " << discoveryPort;
+        UdpDiscoveryServer udps(io_service, port);
+        LOG_INFO << "UDP Discovery listening on port " << port;
         io_service.run();
     } else {
         LOG_INFO << "UDP discovery service not started due to command line option.";
@@ -439,6 +434,7 @@ void UdpDiscoveryThread() {
 static void show_usage(const std::string &name) {
     std::cerr << "Usage: " << name << " <option(s)>"
               << "\nOptions:\n"
+              << "\t-p,--pod\t\tTPMS/pod mode\n"
               << "\t-h,--help\t\tShow this help message\n"
               << std::endl;
 }
@@ -448,35 +444,65 @@ int main(int argc, const char *argv[]) {
     static plog::ColorConsoleAppender <plog::TxtFormatter> consoleAppender;
     plog::init(plog::verbose, &consoleAppender);
 
-    LOG_INFO << "=== [AMM - TCP Bridge] ===";
 
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if ((arg == "-h") || (arg == "--help")) {
-            show_usage(argv[0]);
-            return 0;
-        }
+    short discoveryPort = 8888;
+    int bridgePort = 9015;
+    bool podMode = true;
+    bool discovery = true;
+    int manikinCount = 1;
+    std::string manikinId = "manikin_1";
 
-        if (arg == "-d") {
-            daemonize = 1;
-        }
+    namespace po = boost::program_options;
 
-        if (arg == "-nodiscovery") {
-            discovery = 0;
-        }
+    po::variables_map vm;
+    po::options_description desc("Allowed options");
+    desc.add_options()
+            ("help,h", "print usage message")
+            ("discovery", po::value(&discovery)->default_value(true), "UDP autodiscovery")
+            ("discovery_port,dp", po::value(&discoveryPort)->default_value(8888), "Autodiscovery port")
+            ("server_port,sp", po::value(&bridgePort)->default_value(9015), "Bridge port")
+            ("pod_mode", po::value(&podMode)->default_value(false), "POD mode")
+            ("manikin_id", po::value(&manikinId)->default_value("manikin_1"), "Manikin ID")
+            ("manikins", po::value(&manikinCount)->default_value(1));
+
+
+    // This isn't set to enforce it, but there are two modes of operation
+    //  POD mode, which will register 1-3 manikins and act as the instructor bridge
+    //  Manikin mod, which will register as a single manikin and act as the standard TCP bridge
+
+
+    // TWo example run commands:
+    // ./amm_tcp_bridge -dp=8889 -sp=9016 -pod_mode=true manikins=4
+    //      Will launch in pod mode with 4 manikins
+    //
+    // ./amm_tcp_bridge -dp=8888 -sp=9015 -pod_mode=false manikin_id=manikin_2
+    //      Will launch in manikin mode with a single manikin using profile manikin_2
+
+    // parse arguments and save them in the variable map (vm)
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
+
+    // Check if there are enough args or if --help is given
+    if (vm.count("help")) {
+        std::cerr << desc << "\n";
+        return 1;
     }
 
+    LOG_INFO << "=== [AMM - TCP Bridge] ===";
+
     try {
-        pod.InitializeManikins();
+        pod.SetMode(podMode);
+        pod.InitializeManikins(manikinCount);
     } catch (exception &e) {
         LOG_ERROR << "Unable to initialize manikins in POD: " << e.what();
     }
 
-    std::thread t1(UdpDiscoveryThread);
+    std::thread t1(UdpDiscoveryThread, discoveryPort, discovery);
     s = new Server(bridgePort);
     std::string action;
 
-
+    LOG_INFO << "TCP Bridge listening on port " << bridgePort;
+    
     s->AcceptAndDispatch();
 
     t1.join();

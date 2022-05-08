@@ -7,10 +7,14 @@ using namespace AMM;
 using namespace tinyxml2;
 
 
-Manikin::Manikin(std::string mid) {
+Manikin::Manikin(std::string mid, bool pm) {
+    podMode = pm;
     manikin_id = mid;
 
     LOG_INFO << "Initializing manikin manager and listener for " << mid;
+    if (podMode) {
+        LOG_INFO << "\tCurrently in POD/TPMS mode.";
+    }
     mgr = new DDSManager<Manikin>(config_file, manikin_id);
 
     mgr->InitializeCommand();
@@ -163,7 +167,11 @@ void Manikin::onNewPhysiologyWaveform(AMM::PhysiologyWaveform &n, SampleInfo_t *
             Client *c = Server::GetClientByIndex(cid);
             if (c) {
                 std::ostringstream messageOut;
-                messageOut << n.name() << "=" << n.value() << ";mid=" << manikin_id << "|" << std::endl;
+                if (podMode) {
+                    messageOut << n.name() << "=" << n.value() << ";mid=" << manikin_id << "|" << std::endl;
+                } else {
+                    messageOut << n.name() << "=" << n.value() << "|" << std::endl;
+                }
                 string stringOut = messageOut.str();
                 Server::SendToClient(c, messageOut.str());
             }
@@ -190,7 +198,11 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
             Client *c = Server::GetClientByIndex(cid);
             if (c) {
                 std::ostringstream messageOut;
-                messageOut << n.name() << "=" << n.value() << ";mid=" << manikin_id << "|" << std::endl;
+                if (podMode) {
+                    messageOut << n.name() << "=" << n.value() << ";mid=" << manikin_id << "|" << std::endl;
+                } else {
+                    messageOut << n.name() << "=" << n.value() << "|" << std::endl;
+                }
                 Server::SendToClient(c, messageOut.str());
             }
         }
@@ -431,7 +443,6 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
                << "type=" << rendModType << ";"
                << "location=" << location << ";"
                << "participant_id=" << practitioner << ";"
-               // << "payload=" << rendMod.data()
                << "payload=" << rendModPayload
                << std::endl;
     string stringOut = messageOut.str();

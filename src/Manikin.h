@@ -30,11 +30,13 @@ protected:
     std::map <std::string, std::map<std::string, double>> labNodes;
 
 public:
-    Manikin(std::string mid);
+    Manikin(std::string mid, bool mode);
 
     void SetServer(Server* srv);
 
     ~Manikin();
+
+    bool podMode = false;
 
     AMM::DDSManager <Manikin> *mgr;
 

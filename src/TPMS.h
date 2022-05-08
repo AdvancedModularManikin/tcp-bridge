@@ -11,7 +11,8 @@ public:
 
     ~TPMS();
 
-    void InitializeManikins();
+    void SetMode(bool podMode);
+    void InitializeManikins(int count);
 
     Manikin* GetManikin(std::string mid);
 
@@ -19,6 +20,8 @@ public:
     Manikin* mgr2;
     Manikin* mgr3;
     Manikin* mgr4;
+
+    bool mode;
 
 };
 
