@@ -492,7 +492,11 @@ int main(int argc, const char *argv[]) {
 
     try {
         pod.SetMode(podMode);
-        pod.InitializeManikins(manikinCount);
+        if (podMode) {
+            pod.InitializeManikins(manikinCount);
+        } else {
+            pod.InitializeManikin(manikinId);
+        }
     } catch (exception &e) {
         LOG_ERROR << "Unable to initialize manikins in POD: " << e.what();
     }
@@ -502,7 +506,7 @@ int main(int argc, const char *argv[]) {
     std::string action;
 
     LOG_INFO << "TCP Bridge listening on port " << bridgePort;
-    
+
     s->AcceptAndDispatch();
 
     t1.join();

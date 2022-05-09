@@ -16,8 +16,8 @@ add_executable(amm_tcp_bridge ${TCP_BRIDGE_MODULE_SOURCES})
 target_link_libraries(
    amm_tcp_bridge
         PUBLIC amm_std
-        PUBLIC Boost::system
-        PUBLIC Boost::thread
+        PUBLIC boost_system
+        PUBLIC boost_thread
 		boost_program_options
 	tinyxml2
 )

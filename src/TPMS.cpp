@@ -12,20 +12,32 @@ void TPMS::SetMode(bool podMode) {
     mode = podMode;
 }
 
+void TPMS::InitializeManikin(std::string manikinId) {
+    if (manikinId == "manikin_1") {
+        mgr1 = new Manikin("manikin_1", mode);
+    } else if (manikinId == "manikin_2") {
+        mgr2 = new Manikin("manikin_2", mode);
+    } else if (manikinId == "manikin_3") {
+        mgr3 = new Manikin("manikin_3", mode);
+    } else if (manikinId == "manikin_4") {
+        mgr4 = new Manikin("manikin_4", mode);
+    }
+
+}
+
 void TPMS::InitializeManikins(int count) {
     switch (count) {
         case 4:
-            mgr4 = new Manikin("manikin_4", mode);
+            InitializeManikin("manikin_4");
         case 3:
-            mgr3 = new Manikin("manikin_3", mode);
+            InitializeManikin("manikin_3");
         case 2:
-            mgr2 = new Manikin("manikin_2", mode);
+            InitializeManikin("manikin_2");
         case 1:
-            mgr1 = new Manikin("manikin_1", mode);
+            InitializeManikin("manikin_1");
         default:
             break;
     }
-
 }
 
 Manikin *TPMS::GetManikin(std::string mid) {

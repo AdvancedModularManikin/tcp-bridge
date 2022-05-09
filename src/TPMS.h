@@ -13,6 +13,7 @@ public:
 
     void SetMode(bool podMode);
     void InitializeManikins(int count);
+    void InitializeManikin(std::string manikinId);
 
     Manikin* GetManikin(std::string mid);
 
