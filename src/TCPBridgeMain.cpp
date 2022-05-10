@@ -178,6 +178,10 @@ void *Server::HandleClient(void *args) {
                     }
                     std::string requestManikin = ExtractManikinIDFromString(str);
                     auto tmgr = pod.GetManikin(requestManikin);
+                    if (tmgr == NULL) {
+                        LOG_ERROR << "Message dispatched to manikin that has not been instantied: " << requestManikin;
+                        break;
+                    }
                     if (str.substr(0, modulePrefix.size()) == modulePrefix) {
                         std::string moduleName = str.substr(modulePrefix.size());
 

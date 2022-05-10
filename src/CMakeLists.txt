@@ -18,6 +18,7 @@ target_link_libraries(
         PUBLIC amm_std
         PUBLIC boost_system
         PUBLIC boost_thread
+		pthread
 		boost_program_options
 	tinyxml2
 )
