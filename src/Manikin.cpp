@@ -65,6 +65,19 @@ void Manikin::SetServer(Server *srv) {
 
 }
 
+std::string Manikin::ExtractServiceFromCommand(std::string in) {
+    std::size_t pos = in.find("service=");
+    if (pos != std::string::npos) {
+        std::string mid1 = in.substr(pos + 8);
+        std::size_t pos1 = mid1.find(";");
+        if (pos1 != std::string::npos) {
+            std::string mid2 = mid1.substr(0, pos1);
+            return mid2;
+        }
+        return mid1;
+    }
+    return {};
+}
 
 Manikin::~Manikin() {
     mgr->Shutdown();
@@ -599,6 +612,17 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             simControl.type(AMM::ControlType::RESET);
             mgr->WriteSimulationControl(simControl);
             InitializeLabNodes();
+        } else if (value.find("PUBLISH_ASSESSMENT") != std::string::npos) {
+            LOG_INFO << "Command to publish assessments: " << value;
+        } else if (value.find("START_SERVICE") != std::string::npos) {
+            std::string service = ExtractServiceFromCommand(value);
+            LOG_INFO << "Command to start service " << service;
+        } else if (value.find("STOP_SERVICE") != std::string::npos) {
+            std::string service = ExtractServiceFromCommand(value);
+            LOG_INFO << "Command to stop service " << service;
+        } else if (value.find("RESTART_SERVICE") != std::string::npos) {
+            std::string service = ExtractServiceFromCommand(value);
+            LOG_INFO << "Command to restart service " << service;
         } else if (value.find("END_SIMULATION") != std::string::npos) {
             currentStatus = "NOT RUNNING";
             isPaused = true;

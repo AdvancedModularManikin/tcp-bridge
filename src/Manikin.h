@@ -40,6 +40,8 @@ public:
 
     AMM::DDSManager <Manikin> *mgr;
 
+    std::string ExtractServiceFromCommand(std::string in);
+
     void ParseCapabilities(tinyxml2::XMLElement *node);
 
     void PublishSettings(std::string const &equipmentType);
