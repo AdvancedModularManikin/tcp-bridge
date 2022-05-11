@@ -171,17 +171,20 @@ void *Server::HandleClient(void *args) {
             globalInboundBuffer[c->id].clear();
 
             for (auto str : strings) {
-                boost::trim_right(str);
-                if (!str.empty()) {
+                boost::trim(str);
+                if (!str.empty() && str != "") {
                     if (str.find("KEEPALIVE") != std::string::npos) {
                         break;
                     }
                     std::string requestManikin = ExtractManikinIDFromString(str);
+
                     auto tmgr = pod.GetManikin(requestManikin);
-                    if (tmgr == NULL) {
-                        LOG_ERROR << "Message dispatched to manikin that has not been instantied: " << requestManikin;
+                    if (tmgr == NULL && !requestManikin.empty()) {
+                        LOG_ERROR << "Message: " << str << " (" << str.size() << ")";
+                        LOG_ERROR << " dispatched to manikin that has not been instantied: " << requestManikin;
                         break;
                     }
+
                     if (str.substr(0, modulePrefix.size()) == modulePrefix) {
                         std::string moduleName = str.substr(modulePrefix.size());
 

@@ -50,5 +50,6 @@ Manikin *TPMS::GetManikin(std::string mid) {
     } else if (mid == "manikin_4") {
         return mgr4;
     }
+    return mgr1;
 }
 
