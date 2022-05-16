@@ -68,9 +68,6 @@ const string sysPrefix = "[SYS]";
 const string actPrefix = "[ACT]";
 const string loadPrefix = "LOAD_STATE:";
 
-TPMS pod;
-
-bool closed = false;
 
 std::string ExtractTypeFromRenderMod(std::string payload) {
     std::size_t pos = payload.find("type=");
@@ -113,6 +110,11 @@ std::string gen_random(const int len) {
 
     return tmp_s;
 }
+
+
+TPMS pod;
+
+bool closed = false;
 
 // Override client handler code from Net Server
 void *Server::HandleClient(void *args) {
@@ -427,10 +429,10 @@ void *Server::HandleClient(void *args) {
 
 }
 
-void UdpDiscoveryThread(short port, bool enabled) {
+void UdpDiscoveryThread(short port, bool enabled, std::string manikin_id) {
     if (enabled) {
         boost::asio::io_service io_service;
-        UdpDiscoveryServer udps(io_service, port);
+        UdpDiscoveryServer udps(io_service, port, manikin_id);
         LOG_INFO << "UDP Discovery listening on port " << port;
         io_service.run();
     } else {
@@ -498,17 +500,19 @@ int main(int argc, const char *argv[]) {
     LOG_INFO << "=== [AMM - TCP Bridge] ===";
 
     try {
+        pod.SetID(manikinId);
         pod.SetMode(podMode);
         if (podMode) {
             pod.InitializeManikins(manikinCount);
         } else {
             pod.InitializeManikin(manikinId);
         }
+
     } catch (exception &e) {
         LOG_ERROR << "Unable to initialize manikins in POD: " << e.what();
     }
 
-    std::thread t1(UdpDiscoveryThread, discoveryPort, discovery);
+    std::thread t1(UdpDiscoveryThread, discoveryPort, discovery, manikinId);
     s = new Server(bridgePort);
     std::string action;
 

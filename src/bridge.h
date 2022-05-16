@@ -1,5 +1,6 @@
 #pragma once
-
+#include <map>
+#include <vector>
 
 extern std::map <std::string, std::string> clientMap;
 extern std::map <std::string, std::string> clientTypeMap;

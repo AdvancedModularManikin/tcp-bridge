@@ -6,8 +6,24 @@ using namespace std::chrono;
 using namespace AMM;
 using namespace tinyxml2;
 
+namespace bp = boost::process;
 
-Manikin::Manikin(std::string mid, bool pm) {
+std::string ExtractIDFromString(std::string in) {
+    std::size_t pos = in.find("mid=");
+    if (pos != std::string::npos) {
+        std::string mid1 = in.substr(pos + 4);
+        std::size_t pos1 = mid1.find(";");
+        if (pos1 != std::string::npos) {
+            std::string mid2 = mid1.substr(0, pos1);
+            return mid2;
+        }
+        return mid1;
+    }
+    return {};
+}
+
+Manikin::Manikin(std::string mid, bool pm, std::string pid) {
+    parentId = pid;
     podMode = pm;
     manikin_id = mid;
 
@@ -63,6 +79,29 @@ Manikin::Manikin(std::string mid, bool pm) {
 void Manikin::SetServer(Server *srv) {
     s = srv;
 
+}
+
+void Manikin::MakePrimary() {
+    LOG_INFO << "Making " << parentId << " into the primary.";
+    bp::system("supervisorctl start amm_module_manager");
+    bp::system("supervisorctl start amm_physiology_manager");
+    bp::system("supervisorctl start amm_rest_adapter");
+    bp::system("supervisorctl start amm_sim_manager");
+    bp::system("supervisorctl start amm_tcp_bridge");
+    bp::system("supervisorctl start simple_assessment");
+    bp::system("supervisorctl start amm_xapi_module");
+}
+
+void Manikin::MakeSecondary() {
+    LOG_INFO << "Making " << parentId << " into a secondary.";
+    bp::system("supervisorctl start amm_module_manager");
+    bp::system("supervisorctl start amm_physiology_manager");
+    bp::system("supervisorctl start amm_rest_adapter");
+    bp::system("supervisorctl start amm_sim_manager");
+    bp::system("supervisorctl start amm_tcp_bridge");
+    bp::system("supervisorctl start simple_assessment");
+    bp::system("supervisorctl start amm_xapi_module");
+    bp::system("supervisorctl stop amm_tpms_bridge");
 }
 
 std::string Manikin::ExtractServiceFromCommand(std::string in) {
@@ -234,7 +273,7 @@ void Manikin::onNewPhysiologyModification(AMM::PhysiologyModification &pm, Sampl
         practitioner = er.agent_id().id();
     }
 
-    if ( practitioner.front() != '"' ) {
+    if (practitioner.front() != '"') {
         practitioner = '\"' + practitioner + '\"';
     }
 
@@ -295,7 +334,7 @@ void Manikin::onNewOmittedEvent(AMM::OmittedEvent &oe, SampleInfo_t *info) {
     eData = er.data();
     pType = AMM::Utility::EEventAgentTypeStr(er.agent_type());
 
-    if ( practitioner.front() != '"' ) {
+    if (practitioner.front() != '"') {
         practitioner = '\"' + practitioner + '\"';
     }
 
@@ -344,7 +383,7 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
     eData = er.data();
     pType = AMM::Utility::EEventAgentTypeStr(er.agent_type());
 
-    if ( practitioner.front() != '"' ) {
+    if (practitioner.front() != '"') {
         practitioner = '\"' + practitioner + '\"';
     }
 
@@ -390,7 +429,7 @@ void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo
         eType = er.type();
     }
 
-    if ( practitioner.front() != '"' ) {
+    if (practitioner.front() != '"') {
         practitioner = '\"' + practitioner + '\"';
     }
 
@@ -435,7 +474,7 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
         practitioner = er.agent_id().id();
     }
 
-    if ( practitioner.front() != '"' ) {
+    if (practitioner.front() != '"') {
         practitioner = '\"' + practitioner + '\"';
     }
 
@@ -571,6 +610,7 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
     LOG_INFO << "[TPMS] Command Message came in on manikin " << manikin_id << ": " << c.message();
     if (!c.message().compare(0, sysPrefix.size(), sysPrefix)) {
         std::string value = c.message().substr(sysPrefix.size());
+        std::string mid = ExtractIDFromString(value);
         if (value.find("START_SIM") != std::string::npos) {
             currentStatus = "RUNNING";
             isPaused = false;
@@ -614,15 +654,37 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             InitializeLabNodes();
         } else if (value.find("PUBLISH_ASSESSMENT") != std::string::npos) {
             LOG_INFO << "Command to publish assessments: " << value;
-        } else if (value.find("START_SERVICE") != std::string::npos) {
-            std::string service = ExtractServiceFromCommand(value);
-            LOG_INFO << "Command to start service " << service;
-        } else if (value.find("STOP_SERVICE") != std::string::npos) {
-            std::string service = ExtractServiceFromCommand(value);
-            LOG_INFO << "Command to stop service " << service;
         } else if (value.find("RESTART_SERVICE") != std::string::npos) {
-            std::string service = ExtractServiceFromCommand(value);
-            LOG_INFO << "Command to restart service " << service;
+            if (mid == parentId) {
+                std::string service = ExtractServiceFromCommand(value);
+                LOG_INFO << "Command to restart service " << service;
+                std::string command = "supervisorctl restart " + service;
+                int result = bp::system(command);
+            } else {
+                LOG_TRACE << "Got a restart command that's not for us.";
+            }
+        } else if (value.find("START_SERVICE") != std::string::npos) {
+            if (mid == parentId) {
+                std::string service = ExtractServiceFromCommand(value);
+                LOG_INFO << "Command to start service " << service;
+                std::string command = "supervisorctl start " + service;
+                int result = bp::system(command);
+            }
+        } else if (value.find("STOP_SERVICE") != std::string::npos) {
+            if (mid == parentId) {
+                std::string service = ExtractServiceFromCommand(value);
+                LOG_INFO << "Command to stop service " << service;
+                std::string command = "supervisorctl stop " + service;
+                int result = bp::system(command);
+            }
+        } else if (value.find("SET_PRIMARY") != std::string::npos) {
+            if (mid == parentId) {
+                // we're the primary
+                MakePrimary();
+            } else {
+                // we're a secondary
+                MakeSecondary();
+            }
         } else if (value.find("END_SIMULATION") != std::string::npos) {
             currentStatus = "NOT RUNNING";
             isPaused = true;

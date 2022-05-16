@@ -12,6 +12,7 @@
 #include "Net/Client.h"
 
 #include <tinyxml2.h>
+#include <boost/process.hpp>
 
 #include "bridge.h"
 
@@ -30,7 +31,7 @@ protected:
     std::map <std::string, std::map<std::string, double>> labNodes;
 
 public:
-    Manikin(std::string mid, bool mode);
+    Manikin(std::string mid, bool mode, std::string parentId);
 
     void SetServer(Server* srv);
 
@@ -41,6 +42,9 @@ public:
     AMM::DDSManager <Manikin> *mgr;
 
     std::string ExtractServiceFromCommand(std::string in);
+
+    void MakePrimary();
+    void MakeSecondary();
 
     void ParseCapabilities(tinyxml2::XMLElement *node);
 
@@ -67,6 +71,8 @@ private:
     AMM::UUID m_uuid;
 
     Server* s;
+
+    std::string parentId;
 
     std::map <std::string, std::map<std::string, std::string>> equipmentSettings;
 
