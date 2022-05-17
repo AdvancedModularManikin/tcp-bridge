@@ -130,55 +130,33 @@ void Manikin::onNewStatus(AMM::Status &st, SampleInfo_t *info) {
               << st.capability() << "] Status = " << statusValue.str() << " (" << st.value() << ")";
     // Message = " << st.message();
 
-    if (st.module_name() == "AMM_FluidManager" || st.module_name() == "Torso_Control") {
-        if (st.capability() == "fluidics") {
-            statusStorage["FLUIDICS_STATE"] = statusValue.str();
-        } else if (st.capability() == "clear_supply") {
-            statusStorage["CLEAR_SUPPLY"] = statusValue.str();
-        } else if (st.capability() == "blood_supply") {
-            statusStorage["BLOOD_SUPPLY"] = statusValue.str();
-        } else if (st.capability() == "air_supply") {
-            statusStorage["AIR_SUPPLY"] = statusValue.str();
-            // parse st.message() to double p; [p] = psi
-            try {
-                double p = std::stod(st.message());
-                nodeDataStorage["Air_Pressure"] = p;
-            } catch (const std::invalid_argument &) {
-                nodeDataStorage["Air_Pressure"] = 0.0;
-            } catch (const std::out_of_range &) {
+    std::string sStatus = statusValue.str();
+    std::string sData = st.message();
+
+    std::ostringstream messageOut;
+    messageOut << "[AMM_Status]"
+               << "mid=" << manikin_id << ";"
+               << "capability=" << st.capability() << ";"
+               << "status_code=" << sStatus << ";"
+               << "status=" << st.value() << ";"
+               << "data=" << sData
+               << std::endl;
+    string stringOut = messageOut.str();
+
+    auto it = clientMap.begin();
+    while (it != clientMap.end()) {
+        std::string cid = it->first;
+        std::vector <std::string> subV = subscribedTopics[cid];
+
+        if (std::find(subV.begin(), subV.end(), "AMM_Status") != subV.end()) {
+            Client *c = Server::GetClientByIndex(cid);
+            if (c) {
+                Server::SendToClient(c, stringOut);
             }
         }
+        ++it;
     }
 
-    if (st.module_name() == "AJAMS_Services") {
-        if (st.capability() == "battery-1") {
-            statusStorage["BATTERY1"] = statusValue.str();
-            // parse st.message() to double soc; [soc] = %
-            try {
-                double soc = std::stod(st.message());
-                nodeDataStorage["Battery1_SOC"] = soc;
-            } catch (const std::invalid_argument &) {
-                nodeDataStorage["Battery1_SOC"] = 0.0;
-            } catch (const std::out_of_range &) {
-            }
-        } else if (st.capability() == "battery-2") {
-            statusStorage["BATTERY2"] = statusValue.str();
-            // parse st.message() to double soc; [soc] = %
-            try {
-                double soc = std::stod(st.message());
-                nodeDataStorage["Battery2_SOC"] = soc;
-            } catch (const std::invalid_argument &) {
-                nodeDataStorage["Battery2_SOC"] = 0.0;
-            } catch (const std::out_of_range &) {
-            }
-        } else if (st.capability() == "ext_power") {
-            statusStorage["EXT_POWER"] = statusValue.str();
-        }
-    }
-
-    if (st.capability() == "iv_detection") {
-        statusStorage["IVARM_STATE"] = statusValue.str();
-    }
 }
 
 void Manikin::onNewModuleConfiguration(AMM::ModuleConfiguration &mc, SampleInfo_t *info) {
