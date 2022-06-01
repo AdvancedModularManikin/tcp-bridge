@@ -30,6 +30,32 @@ protected:
 
     std::map <std::string, std::map<std::string, double>> labNodes;
 
+    std::vector <std::string> primaryServices = {
+            "amm_module_manager",
+            "amm_physiology_manager",
+            "amm_sim_manager",
+            "amm_tcp_bridge",
+            "amm_rest_adapter",
+            "simple_assessment",
+            "amm_xapi_module",
+            "amm_serial_bridge",
+            "amm_sound",
+            "ajams_services"
+    };
+
+    std::vector <std::string> secondaryServices = {
+            "amm_module_manager",
+            "amm_physiology_manager",
+            "amm_sim_manager",
+            "amm_tcp_bridge",
+            "amm_rest_adapter",
+            "simple_assessment",
+            "amm_xapi_module",
+            "amm_serial_bridge",
+            "amm_sound",
+            "ajams_services"
+    };
+
 public:
     Manikin(std::string mid, bool mode, std::string parentId);
 

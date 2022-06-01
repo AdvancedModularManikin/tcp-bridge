@@ -90,6 +90,9 @@ void Manikin::MakePrimary() {
     bp::system("supervisorctl start amm_tcp_bridge");
     bp::system("supervisorctl start simple_assessment");
     bp::system("supervisorctl start amm_xapi_module");
+    bp::system("supervisorctl start amm_serial_bridge");
+    bp::system("supervisorctl start amm_sound");
+    bp::system("supervisorctl start ajams_services");
 }
 
 void Manikin::MakeSecondary() {
@@ -102,6 +105,9 @@ void Manikin::MakeSecondary() {
     bp::system("supervisorctl start simple_assessment");
     bp::system("supervisorctl start amm_xapi_module");
     bp::system("supervisorctl stop amm_tpms_bridge");
+    bp::system("supervisorctl start amm_serial_bridge");
+    bp::system("supervisorctl start amm_sound");
+    bp::system("supervisorctl start ajams_services");
 }
 
 std::string Manikin::ExtractServiceFromCommand(std::string in) {
@@ -143,6 +149,8 @@ void Manikin::onNewStatus(AMM::Status &st, SampleInfo_t *info) {
                << std::endl;
     string stringOut = messageOut.str();
 
+    LOG_TRACE << " Sending status message to clients: " << messageOut.str();
+
     auto it = clientMap.begin();
     while (it != clientMap.end()) {
         std::string cid = it->first;
@@ -173,7 +181,7 @@ void Manikin::onNewModuleConfiguration(AMM::ModuleConfiguration &mc, SampleInfo_
         } else {
             clientType = pos->second;
         }
-        if (clientType.find(mc.name()) != std::string::npos) {
+        if (clientType.find(mc.name()) != std::string::npos || mc.name() == "metadata") {
             Client *c = Server::GetClientByIndex(cid);
             if (c) {
                 std::string encodedConfigContent = Utility::encode64(mc.capabilities_configuration());
@@ -882,27 +890,36 @@ void Manikin::DispatchRequest(Client *c, std::string const &request, std::string
         messageOut << "SCENARIO" << "=" << currentScenario << "|";
         messageOut << "STATE" << "=" << currentState << "|";
         Server::SendToClient(c, messageOut.str());
+    } else if (boost::starts_with(request, "CLIENTS")) {
+        LOG_TRACE << "Client table request";
+        std::ostringstream messageOut;
+        messageOut << "client_id,client_name,client_connection,client_type,connect_time" << std::endl;
+        messageOut << "IMPACTT-49,Test Person1,RTC,impactt_all_in_one,1653404965" << std::endl;
+        messageOut << "IMPACTT-12,Test Person2,RTC,impactt_all_in_one,1653401022" << std::endl;
+        messageOut << "propaq,,TCP,propaq,1653404965" << std::endl;
+        Server::SendToClient(c, messageOut.str());
     } else if (boost::starts_with(request, "LABS")) {
-        LOG_DEBUG << "LABS request: " << request;
-        const auto equals_idx = request.find_first_of(';');
-        if (std::string::npos != equals_idx) {
-            auto str = request.substr(equals_idx + 1);
-            LOG_DEBUG << "Return lab values for " << str;
-            auto it = labNodes[str].begin();
-            while (it != labNodes[str].end()) {
-                std::ostringstream messageOut;
-                messageOut << it->first << "=" << it->second << ":" << str << ";mid=" << mid << "|";
-                Server::SendToClient(c, messageOut.str());
-                ++it;
-            }
-        } else {
-            LOG_DEBUG << "No specific labs requested, return all values.";
-            auto it = labNodes["ALL"].begin();
-            while (it != labNodes["ALL"].end()) {
-                std::ostringstream messageOut;
-                messageOut << it->first << "=" << it->second << ";mid=" << mid << "|";
-                Server::SendToClient(c, messageOut.str());
-                ++it;
+            LOG_DEBUG << "LABS request: " << request;
+            const auto equals_idx = request.find_first_of(';');
+            if (std::string::npos != equals_idx) {
+                auto str = request.substr(equals_idx + 1);
+                LOG_DEBUG << "Return lab values for " << str;
+                auto it = labNodes[str].begin();
+                while (it != labNodes[str].end()) {
+                    std::ostringstream messageOut;
+                    messageOut << it->first << "=" << it->second << ":" << str << ";mid=" << mid << "|";
+                    Server::SendToClient(c, messageOut.str());
+                    ++it;
+                }
+            } else {
+                LOG_DEBUG << "No specific labs requested, return all values.";
+                auto it = labNodes["ALL"].begin();
+                while (it != labNodes["ALL"].end()) {
+                    std::ostringstream messageOut;
+                    messageOut << it->first << "=" << it->second << ";mid=" << mid << "|";
+                    Server::SendToClient(c, messageOut.str());
+                    ++it;
+                }
             }
         }
     }
