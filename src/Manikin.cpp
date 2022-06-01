@@ -899,31 +899,31 @@ void Manikin::DispatchRequest(Client *c, std::string const &request, std::string
         messageOut << "propaq,,TCP,propaq,1653404965" << std::endl;
         Server::SendToClient(c, messageOut.str());
     } else if (boost::starts_with(request, "LABS")) {
-            LOG_DEBUG << "LABS request: " << request;
-            const auto equals_idx = request.find_first_of(';');
-            if (std::string::npos != equals_idx) {
-                auto str = request.substr(equals_idx + 1);
-                LOG_DEBUG << "Return lab values for " << str;
-                auto it = labNodes[str].begin();
-                while (it != labNodes[str].end()) {
-                    std::ostringstream messageOut;
-                    messageOut << it->first << "=" << it->second << ":" << str << ";mid=" << mid << "|";
-                    Server::SendToClient(c, messageOut.str());
-                    ++it;
-                }
-            } else {
-                LOG_DEBUG << "No specific labs requested, return all values.";
-                auto it = labNodes["ALL"].begin();
-                while (it != labNodes["ALL"].end()) {
-                    std::ostringstream messageOut;
-                    messageOut << it->first << "=" << it->second << ";mid=" << mid << "|";
-                    Server::SendToClient(c, messageOut.str());
-                    ++it;
-                }
+        LOG_DEBUG << "LABS request: " << request;
+        const auto equals_idx = request.find_first_of(';');
+        if (std::string::npos != equals_idx) {
+            auto str = request.substr(equals_idx + 1);
+            LOG_DEBUG << "Return lab values for " << str;
+            auto it = labNodes[str].begin();
+            while (it != labNodes[str].end()) {
+                std::ostringstream messageOut;
+                messageOut << it->first << "=" << it->second << ":" << str << ";mid=" << mid << "|";
+                Server::SendToClient(c, messageOut.str());
+                ++it;
+            }
+        } else {
+            LOG_DEBUG << "No specific labs requested, return all values.";
+            auto it = labNodes["ALL"].begin();
+            while (it != labNodes["ALL"].end()) {
+                std::ostringstream messageOut;
+                messageOut << it->first << "=" << it->second << ";mid=" << mid << "|";
+                Server::SendToClient(c, messageOut.str());
+                ++it;
             }
         }
     }
 }
+
 
 void Manikin::PublishOperationalDescription() {
     AMM::OperationalDescription od;
