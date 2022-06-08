@@ -472,7 +472,8 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
         rendModType = "";
     } else {
         rendModPayload = rendMod.data();
-        rendModType = rendMod.type();
+        // rendModType = rendMod.type();
+        rendModType = "";
     }
     messageOut << "[AMM_Render_Modification]"
                << "id=" << rendMod.id().id() << ";"
