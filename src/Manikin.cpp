@@ -259,10 +259,6 @@ void Manikin::onNewPhysiologyModification(AMM::PhysiologyModification &pm, Sampl
         practitioner = er.agent_id().id();
     }
 
-    if (practitioner.front() != '"') {
-        practitioner = '\"' + practitioner + '\"';
-    }
-
     std::ostringstream messageOut;
     messageOut << "[AMM_Physiology_Modification]"
                << "id=" << pm.id().id() << ";"
@@ -320,10 +316,6 @@ void Manikin::onNewOmittedEvent(AMM::OmittedEvent &oe, SampleInfo_t *info) {
     eData = er.data();
     pType = AMM::Utility::EEventAgentTypeStr(er.agent_type());
 
-    if (practitioner.front() != '"') {
-        practitioner = '\"' + practitioner + '\"';
-    }
-
     std::ostringstream messageOut;
 
     messageOut << "[AMM_OmittedEvent]"
@@ -369,10 +361,6 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
     eData = er.data();
     pType = AMM::Utility::EEventAgentTypeStr(er.agent_type());
 
-    if (practitioner.front() != '"') {
-        practitioner = '\"' + practitioner + '\"';
-    }
-
     std::ostringstream messageOut;
 
     messageOut << "[AMM_EventRecord]"
@@ -415,9 +403,6 @@ void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo
         eType = er.type();
     }
 
-    if (practitioner.front() != '"') {
-        practitioner = '\"' + practitioner + '\"';
-    }
 
     std::ostringstream messageOut;
 
@@ -458,10 +443,6 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
         AMM::EventRecord er = eventRecords[rendMod.event_id().id()];
         location = er.location().name();
         practitioner = er.agent_id().id();
-    }
-
-    if (practitioner.front() != '"') {
-        practitioner = '\"' + practitioner + '\"';
     }
 
     std::ostringstream messageOut;
