@@ -89,7 +89,7 @@ void Manikin::MakePrimary() {
 
 void Manikin::MakeSecondary() {
     LOG_INFO << "Making " << parentId << " into a secondary.";
-    bp::system("supervisorctl start amm_startupr");
+    bp::system("supervisorctl start amm_startup");
     bp::system("supervisorctl stop amm_tpms_bridge");
 
 }
