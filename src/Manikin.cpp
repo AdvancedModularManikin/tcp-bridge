@@ -648,16 +648,16 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             std::string tmsg = "ACT=END_SIMULATION_SIM;mid=" + manikin_id;
             s->SendToAll(tmsg);
         } else if (!value.compare(0, loadScenarioPrefix.size(), loadScenarioPrefix)) {
-            // currentScenario = value.substr(loadScenarioPrefix.size());
+            currentScenario = value.substr(loadScenarioPrefix.size());
             // sendConfigToAll(currentScenario);
-            // std::ostringstream messageOut;
-            // messageOut << "ACT" << "=" << c.message() << std::endl;
-            // s->SendToAll(messageOut.str());
+            std::ostringstream messageOut;
+            messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
+            s->SendToAll(messageOut.str());
         } else if (!value.compare(0, loadPrefix.size(), loadPrefix)) {
-            // currentState = value.substr(loadStatePrefix.size());
-            // std::ostringstream messageOut;
-            // messageOut << "ACT" << "=" << c.message() << std::endl;
-            // s->SendToAll(messageOut.str());
+            currentState = value.substr(loadStatePrefix.size());
+            std::ostringstream messageOut;
+            messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
+            s->SendToAll(messageOut.str());
         } else {
             std::ostringstream messageOut;
             messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
