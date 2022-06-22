@@ -83,31 +83,15 @@ void Manikin::SetServer(Server *srv) {
 
 void Manikin::MakePrimary() {
     LOG_INFO << "Making " << parentId << " into the primary.";
-    bp::system("supervisorctl start amm_module_manager");
-    bp::system("supervisorctl start amm_physiology_manager");
-    bp::system("supervisorctl start amm_rest_adapter");
-    bp::system("supervisorctl start amm_sim_manager");
-    bp::system("supervisorctl start amm_tcp_bridge");
-    bp::system("supervisorctl start simple_assessment");
-    bp::system("supervisorctl start amm_xapi_module");
-    bp::system("supervisorctl start amm_serial_bridge");
-    bp::system("supervisorctl start amm_sound");
-    bp::system("supervisorctl start ajams_services");
+    bp::system("supervisorctl start amm_startup");
+    bp::system("supervisorctl start amm_tpms_bridge");
 }
 
 void Manikin::MakeSecondary() {
     LOG_INFO << "Making " << parentId << " into a secondary.";
-    bp::system("supervisorctl start amm_module_manager");
-    bp::system("supervisorctl start amm_physiology_manager");
-    bp::system("supervisorctl start amm_rest_adapter");
-    bp::system("supervisorctl start amm_sim_manager");
-    bp::system("supervisorctl start amm_tcp_bridge");
-    bp::system("supervisorctl start simple_assessment");
-    bp::system("supervisorctl start amm_xapi_module");
+    bp::system("supervisorctl start amm_startupr");
     bp::system("supervisorctl stop amm_tpms_bridge");
-    bp::system("supervisorctl start amm_serial_bridge");
-    bp::system("supervisorctl start amm_sound");
-    bp::system("supervisorctl start ajams_services");
+
 }
 
 std::string Manikin::ExtractServiceFromCommand(std::string in) {
