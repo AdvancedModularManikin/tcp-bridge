@@ -49,7 +49,7 @@ std::map <std::string, std::vector<std::string>> subscribedTopics;
 std::map <std::string, std::vector<std::string>> publishedTopics;
 
 std::map <std::string, std::string> globalInboundBuffer;
-const string DEFAULT_MANIKIN_ID = "manikin_1";
+std::string DEFAULT_MANIKIN_ID = "manikin_1";
 const string capabilityPrefix = "CAPABILITY=";
 const string settingsPrefix = "SETTINGS=";
 const string statusPrefix = "STATUS=";
@@ -93,7 +93,7 @@ std::string ExtractManikinIDFromString(std::string in) {
         }
         return mid1;
     }
-    return {};
+    return DEFAULT_MANIKIN_ID;
 }
 
 std::string gen_random(const int len) {
@@ -459,7 +459,7 @@ int main(int argc, const char *argv[]) {
     bool podMode = true;
     bool discovery = true;
     int manikinCount = 1;
-    std::string manikinId = "manikin_1";
+    std::string manikinId = DEFAULT_MANIKIN_ID;
 
     namespace po = boost::program_options;
 
@@ -497,6 +497,8 @@ int main(int argc, const char *argv[]) {
         return 1;
     }
 
+    DEFAULT_MANIKIN_ID = manikinId;
+    
     LOG_INFO << "=== [AMM - TCP Bridge] ===";
 
     try {
