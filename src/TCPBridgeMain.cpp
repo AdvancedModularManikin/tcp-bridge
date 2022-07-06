@@ -49,7 +49,11 @@ std::map <std::string, std::vector<std::string>> subscribedTopics;
 std::map <std::string, std::vector<std::string>> publishedTopics;
 
 std::map <std::string, std::string> globalInboundBuffer;
+<<<<<<< HEAD
 string DEFAULT_MANIKIN_ID = "manikin_1";
+=======
+std::string DEFAULT_MANIKIN_ID = "manikin_1";
+>>>>>>> c11b27e5a833f977a2e309e6430b1f567dec5b89
 const string capabilityPrefix = "CAPABILITY=";
 const string settingsPrefix = "SETTINGS=";
 const string statusPrefix = "STATUS=";
@@ -459,7 +463,7 @@ int main(int argc, const char *argv[]) {
     bool podMode = true;
     bool discovery = true;
     int manikinCount = 1;
-    std::string manikinId = "manikin_1";
+    std::string manikinId = DEFAULT_MANIKIN_ID;
 
     namespace po = boost::program_options;
 
@@ -498,6 +502,11 @@ int main(int argc, const char *argv[]) {
     }
 
     DEFAULT_MANIKIN_ID = manikinId;
+<<<<<<< HEAD
+=======
+    
+    LOG_INFO << "=== [AMM - TCP Bridge] ===";
+>>>>>>> c11b27e5a833f977a2e309e6430b1f567dec5b89
 
     LOG_INFO << "=== [AMM - TCP Bridge] ===";
     try {
