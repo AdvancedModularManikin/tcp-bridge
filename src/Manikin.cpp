@@ -456,6 +456,10 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
                  << stringOut;
     }
 
+    if (rendModPayload.find("CHOSE_ROLE") == std::string::npos) {
+        LOG_INFO << "Role chooser, break up participant: " << practitioner;
+    }
+
     auto it = clientMap.begin();
     while (it != clientMap.end()) {
         std::string cid = it->first;
@@ -859,10 +863,10 @@ void Manikin::DispatchRequest(Client *c, std::string const &request, std::string
     } else if (boost::starts_with(request, "CLIENTS")) {
         LOG_TRACE << "Client table request";
         std::ostringstream messageOut;
-        messageOut << "client_id,client_name,client_connection,client_type,connect_time" << std::endl;
-        messageOut << "IMPACTT-49,Test Person1,RTC,impactt_all_in_one,1653404965" << std::endl;
-        messageOut << "IMPACTT-12,Test Person2,RTC,impactt_all_in_one,1653401022" << std::endl;
-        messageOut << "propaq,,TCP,propaq,1653404965" << std::endl;
+        messageOut << "client_id,client_name,client_connection,client_type,role,connect_time" << std::endl;
+        messageOut << "IMPACTT-49,Test Person1,RTC,impactt_all_in_one,0,1653404965" << std::endl;
+        messageOut << "IMPACTT-12,Test Person2,RTC,impactt_all_in_one,1,1653401022" << std::endl;
+        messageOut << "propaq,,TCP,propaq,0,1653404965" << std::endl;
         Server::SendToClient(c, messageOut.str());
     } else if (boost::starts_with(request, "LABS")) {
         LOG_DEBUG << "LABS request: " << request;

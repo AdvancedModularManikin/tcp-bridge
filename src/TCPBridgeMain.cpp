@@ -49,7 +49,7 @@ std::map <std::string, std::vector<std::string>> subscribedTopics;
 std::map <std::string, std::vector<std::string>> publishedTopics;
 
 std::map <std::string, std::string> globalInboundBuffer;
-const string DEFAULT_MANIKIN_ID = "manikin_1";
+string DEFAULT_MANIKIN_ID = "manikin_1";
 const string capabilityPrefix = "CAPABILITY=";
 const string settingsPrefix = "SETTINGS=";
 const string statusPrefix = "STATUS=";
@@ -93,7 +93,7 @@ std::string ExtractManikinIDFromString(std::string in) {
         }
         return mid1;
     }
-    return {};
+    return DEFAULT_MANIKIN_ID;
 }
 
 std::string gen_random(const int len) {
@@ -497,8 +497,9 @@ int main(int argc, const char *argv[]) {
         return 1;
     }
 
-    LOG_INFO << "=== [AMM - TCP Bridge] ===";
+    DEFAULT_MANIKIN_ID = manikinId;
 
+    LOG_INFO << "=== [AMM - TCP Bridge] ===";
     try {
         pod.SetID(manikinId);
         pod.SetMode(podMode);
