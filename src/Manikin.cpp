@@ -875,7 +875,7 @@ void Manikin::DispatchRequest(Client *c, std::string const &request, std::string
     } else if (boost::starts_with(request, "CLIENTS")) {
         LOG_TRACE << "Client table request";
         std::ostringstream messageOut;
-        messageOut << "client_id,client_name,client_name,client_connection,client_type,role,connect_time" << std::endl;
+        messageOut << "client_id,client_name,learner_name,client_connection,client_type,role,connect_time" << std::endl;
         messageOut << "109136a4-fec3-11ec-b939-0242ac120002,IMPACTT-49,Test Person1,RTC,impactt_all_in_one,0,1653404965" << std::endl;
         messageOut << "1d1831d4-fec3-11ec-b939-0242ac120002,IMPACTT-12,Test Person2,RTC,impactt_all_in_one,1,1653401022" << std::endl;
         messageOut << "21bd017e-fec3-11ec-b939-0242ac120002,propaq,,TCP,propaq,0,1653404965" << std::endl;
