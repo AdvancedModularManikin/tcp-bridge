@@ -198,10 +198,15 @@ void *Server::HandleClient(void *args) {
                         LOG_DEBUG << "Client " << c->id
                                   << " module connected: " << moduleName;
                     } else if (str.substr(0, registerPrefix.size()) == registerPrefix) {
-                        // Registering for data
+                        // Registering name
                         std::string registerVal = str.substr(registerPrefix.size());
                         LOG_INFO << "Client " << c->id
-                                 << " registered for: " << registerVal;
+                                 << " registered name: " << registerVal;
+                    } else if (str.substr(0, kickPrefix.size()) == kickPrefix) {
+                        // kick client
+                        std::string kickVal = str.substr(kickPrefix.size());
+                        LOG_INFO << "Client " << c->id
+                                 << " requested kick of uuid: " << kickVal;
                     } else if (str.substr(0, statusPrefix.size()) == statusPrefix) {
                         // Client set their status (OPERATIONAL, etc)
                         std::string statusVal;
@@ -346,6 +351,13 @@ void *Server::HandleClient(void *args) {
                             if (modType.empty()) {
                                 modType = ExtractTypeFromRenderMod(modPayload);
                             };
+
+
+                            // [AMM_Render_Modification]payload=<RenderModification type="CHOSE_ROLE"/>;participant_id=[role ID as int]:[unique ID as string]:[player name as string]
+
+                            if (modType.find("CHOSE_ROLE") != std::string::npos) {
+
+                            }
 
                             AMM::EventRecord er;
                             er.id(erID);
