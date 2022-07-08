@@ -57,6 +57,7 @@ const string statusPrefix = "STATUS=";
 const string configPrefix = "CONFIG=";
 const string modulePrefix = "MODULE_NAME=";
 const string registerPrefix = "REGISTER=";
+const string kickPrefix = "KICK=";
 const string requestPrefix = "REQUEST=";
 const string keepHistoryPrefix = "KEEP_HISTORY=";
 const string actionPrefix = "ACT=";
