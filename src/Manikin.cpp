@@ -614,8 +614,20 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             if (mid == parentId) {
                 std::string service = ExtractServiceFromCommand(value);
                 LOG_INFO << "Command to restart service " << service;
-                std::string command = "supervisorctl restart " + service;
-                int result = bp::system(command);
+                if (service.find("all") != std::string::npos) {
+                    LOG_INFO << "Restarting all services, which is like assigning primary.";
+                    if (mid == parentId) {
+                        // we're the primary
+                        MakePrimary();
+                    } else {
+                        // we're a secondary
+                        MakeSecondary();
+                    }
+                } else {
+                    LOG_INFO << "Restarting single service.";
+                    std::string command = "supervisorctl restart " + service;
+                    int result = bp::system(command);
+                }
             } else {
                 LOG_TRACE << "Got a restart command that's not for us.";
             }
@@ -633,7 +645,7 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
                         MakeSecondary();
                     }
                 } else {
-                    LOG_INFO << "Restarting single service.";
+                    LOG_INFO << "Starting single service.";
                     std::string command = "supervisorctl start " + service;
                     int result = bp::system(command);
                 }
