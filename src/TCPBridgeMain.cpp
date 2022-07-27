@@ -92,6 +92,14 @@ void *Server::HandleClient(void *args) {
     LOG_DEBUG << "Adding client with id: " << c->id;
     ServerThread::UnlockMutex(uuid);
 
+    auto gc = GetGameClient(c->id);
+    const auto p1 = std::chrono::system_clock::now();
+    gc.client_id = c->id;
+    gc.client_connection = "TCP";
+    gc.connect_time = std::chrono::duration_cast<std::chrono::seconds>(
+            p1.time_since_epoch()).count();
+    UpdateGameClient(c->id, gc);
+
     while (true) {
         memset(buffer, 0, sizeof buffer);
         n = recv(c->sock, buffer, sizeof buffer, 0);
@@ -158,16 +166,6 @@ void *Server::HandleClient(void *args) {
                         LOG_INFO << "Client " << c->id
                                  << " registered name: " << registerVal;
                         vector<string> v = split (registerVal, ';');
-                        auto gc = GetGameClient(c->id);
-                        const auto p1 = std::chrono::system_clock::now();
-                        gc.client_name = c->id;
-                        //gc.learner_name = v[0];
-                        //gc.client_id = v[1];
-                        gc.client_connection = "TCP";
-                        gc.connect_time = std::chrono::duration_cast<std::chrono::seconds>(
-                                p1.time_since_epoch()).count();
-                        UpdateGameClient(c->id, gc);
-
 
                     } else if (str.substr(0, kickPrefix.size()) == kickPrefix) {
                         // kick client
