@@ -931,7 +931,7 @@ void Manikin::DispatchRequest(Client *c, std::string const &request, std::string
         messageOut << "STATE" << "=" << currentState << "|";
         Server::SendToClient(c, messageOut.str());
     } else if (boost::starts_with(request, "CLIENTS")) {
-        LOG_TRACE << "Client table request";
+        LOG_DEBUG << "Client table request";
         std::ostringstream messageOut;
         messageOut << "client_id,client_name,learner_name,client_connection,client_type,role,connect_time" << std::endl;
 
@@ -942,7 +942,7 @@ void Manikin::DispatchRequest(Client *c, std::string const &request, std::string
                        << clientData.learner_name << "," << clientData.client_connection << ","
                        << clientData.client_type << "," << clientData.role << "," <<
                        clientData.connect_time << std::endl;
-            LOG_TRACE << messageOut.str();
+            // LOG_TRACE << messageOut.str();
         }
 
 
