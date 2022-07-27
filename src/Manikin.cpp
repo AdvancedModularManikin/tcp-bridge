@@ -834,6 +834,10 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
     subscribedTopics[c->id].clear();
     publishedTopics[c->id].clear();
 
+    ConnectionData gc = GetGameClient(c->id);
+    gc.client_type = nodeName;
+    UpdateGameClient(c->id, gc);
+
     tinyxml2::XMLElement *caps =
             module->FirstChildElement("capabilities");
     if (caps) {
