@@ -27,7 +27,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/bin)
 
 if (MSVC)
-    add_compile_options(/std:c++14 /W3)
+    add_compile_options(/W3)
     add_definitions(-DNOMINMAX)
     add_definitions(-DWIN32_LEAN_AND_MEAN)
     add_definitions(-DBOOST_ALL_NO_LIB)
@@ -51,9 +51,12 @@ if (MSVC)
         set(CMAKE_INSTALL_PREFIX "C:/Program Files (x86)/${CMAKE_PROJECT_NAME}")
     endif ()
 else ()
-    add_compile_options(-std=c++14)
     add_compile_options(-O0)
 endif ()
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++2a")
 
 FIND_PACKAGE(Boost 1.67.0 REQUIRED COMPONENTS system thread)
 

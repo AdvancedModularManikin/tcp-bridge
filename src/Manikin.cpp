@@ -8,19 +8,6 @@ using namespace tinyxml2;
 
 namespace bp = boost::process;
 
-std::string ExtractIDFromString(std::string in) {
-    std::size_t pos = in.find("mid=");
-    if (pos != std::string::npos) {
-        std::string mid1 = in.substr(pos + 4);
-        std::size_t pos1 = mid1.find(";");
-        if (pos1 != std::string::npos) {
-            std::string mid2 = mid1.substr(0, pos1);
-            return mid2;
-        }
-        return mid1;
-    }
-    return {};
-}
 
 Manikin::Manikin(std::string mid, bool pm, std::string pid) {
     parentId = pid;
@@ -608,8 +595,8 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             simControl.type(AMM::ControlType::RESET);
             mgr->WriteSimulationControl(simControl);
             InitializeLabNodes();
-       // } else if (value.find("PUBLISH_ASSESSMENT") != std::string::npos) {
-       //     LOG_INFO << "Command to publish assessments: " << value;
+            // } else if (value.find("PUBLISH_ASSESSMENT") != std::string::npos) {
+            //     LOG_INFO << "Command to publish assessments: " << value;
         } else if (value.find("RESTART_SERVICE") != std::string::npos) {
             if (mid == parentId) {
                 std::string service = ExtractServiceFromCommand(value);
@@ -675,6 +662,61 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             mgr->WriteSimulationControl(simControl);
             std::string tmsg = "ACT=END_SIMULATION_SIM;mid=" + manikin_id;
             s->SendToAll(tmsg);
+        } else if (value.find("UPDATE_CLIENT") != std::string::npos) {
+            std::string clientData = value.substr(sizeof("UPDATE_CLIENT"));
+            LOG_INFO << "Updating client with client data:" << clientData;
+            std::list <std::string> tokenList;
+            split(tokenList, clientData, boost::algorithm::is_any_of(";"), boost::token_compress_on);
+            std::map <std::string, std::string> kvp;
+
+            BOOST_FOREACH(std::string
+            token, tokenList) {
+                size_t sep_pos = token.find_first_of("=");
+                std::string key = token.substr(0, sep_pos);
+                boost::algorithm::to_lower(key);
+                std::string value = (sep_pos == std::string::npos ? "" : token.substr(
+                        sep_pos + 1,
+                        std::string::npos));
+                kvp[key] = value;
+                LOG_DEBUG << "\t" << key << " => " << kvp[key];
+            }
+
+            std::string client_id;
+            if (kvp.find("client_id") != kvp.end()) {
+                client_id = kvp["client_id"];
+            } else {
+                LOG_WARNING << "No client ID found, we can't do anything with this.";
+                return;
+            }
+
+            ConnectionData gc = GetGameClient(client_id);
+            gc.client_id = client_id;
+            if (kvp.find("client_name") != kvp.end()) {
+                gc.client_name = kvp["client_name"];
+            }
+            if (kvp.find("learner_name") != kvp.end()) {
+                gc.learner_name = kvp["learner_name"];
+            }
+            if (kvp.find("client_connection") != kvp.end()) {
+                gc.client_connection = kvp["client_connection"];
+            }
+            if (kvp.find("client_type") != kvp.end()) {
+                gc.client_type = kvp["client_type"];
+            }
+            if (kvp.find("role") != kvp.end()) {
+                gc.role = kvp["role"];
+            }
+            if (kvp.find("connect_time") != kvp.end()) {
+                gc.connect_time = stoi(kvp["connect_time"]);
+            }
+
+            LOG_INFO << "Updating client " << client_id;
+            UpdateGameClient(client_id, gc);
+
+        } else if (value.find("KICK") != std::string::npos) {
+            std::string kickC = value.substr(sizeof("KICK"));
+            LOG_INFO << "Got kick via DDS bus command, let's not doing anything with that.";
+
         } else if (!value.compare(0, loadScenarioPrefix.size(), loadScenarioPrefix)) {
             currentScenario = value.substr(loadScenarioPrefix.size());
             // sendConfigToAll(currentScenario);
@@ -888,9 +930,18 @@ void Manikin::DispatchRequest(Client *c, std::string const &request, std::string
         LOG_TRACE << "Client table request";
         std::ostringstream messageOut;
         messageOut << "client_id,client_name,learner_name,client_connection,client_type,role,connect_time" << std::endl;
-        messageOut << "109136a4-fec3-11ec-b939-0242ac120002,IMPACTT-49,Test Person1,RTC,impactt_all_in_one,0,1653404965" << std::endl;
-        messageOut << "1d1831d4-fec3-11ec-b939-0242ac120002,IMPACTT-12,Test Person2,RTC,impactt_all_in_one,1,1653401022" << std::endl;
-        messageOut << "21bd017e-fec3-11ec-b939-0242ac120002,propaq,,TCP,propaq,0,1653404965" << std::endl;
+
+        for ( const auto &c : gameClientList )
+        {
+            ConnectionData clientData = c.second;
+            messageOut << clientData.client_id << "," << clientData.client_name << ","
+                       << clientData.learner_name << "," << clientData.client_connection << ","
+                       << clientData.client_type << "," << clientData.role << "," <<
+                       clientData.connect_time << std::endl;
+            LOG_TRACE << messageOut.str();
+        }
+
+
         Server::SendToClient(c, messageOut.str());
     } else if (boost::starts_with(request, "LABS")) {
         LOG_DEBUG << "LABS request: " << request;

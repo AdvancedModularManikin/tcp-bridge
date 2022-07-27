@@ -1,22 +1,3 @@
-#include <algorithm>
-#include <fstream>
-#include <map>
-
-#include <boost/algorithm/string.hpp>
-#include <boost/archive/iterators/base64_from_binary.hpp>
-#include <boost/archive/iterators/binary_from_base64.hpp>
-#include <boost/archive/iterators/transform_width.hpp>
-#include <boost/archive/text_iarchive.hpp>
-#include <boost/archive/text_oarchive.hpp>
-#include <boost/assign/list_of.hpp>
-#include <boost/assign/std/vector.hpp>
-#include <boost/serialization/map.hpp>
-#include <boost/foreach.hpp>
-#include <boost/bind.hpp>
-#include <boost/asio.hpp>
-#include <boost/thread.hpp>
-
-#include <boost/program_options.hpp>
 
 #include "Net/Client.h"
 #include "Net/Server.h"
@@ -26,11 +7,12 @@
 
 #include "amm/BaseLogger.h"
 
+#include "bridge.h"
+
 #include "TPMS.h"
 
 #include "tinyxml2.h"
 
-#include "bridge.h"
 
 using namespace std;
 using namespace tinyxml2;
@@ -47,8 +29,9 @@ std::map <std::string, std::string> clientTypeMap;
 
 std::map <std::string, std::vector<std::string>> subscribedTopics;
 std::map <std::string, std::vector<std::string>> publishedTopics;
-
+std::map <std::string, ConnectionData> gameClientList;
 std::map <std::string, std::string> globalInboundBuffer;
+
 std::string DEFAULT_MANIKIN_ID = "manikin_1";
 
 const string capabilityPrefix = "CAPABILITY=";
@@ -71,18 +54,9 @@ const string actPrefix = "[ACT]";
 const string loadPrefix = "LOAD_STATE:";
 
 
-std::string ExtractTypeFromRenderMod(std::string payload) {
-    std::size_t pos = payload.find("type=");
-    if (pos != std::string::npos) {
-        std::string p1 = payload.substr(pos + 6);
-        std::size_t pos2 = p1.find("\"");
-        if (pos2 != std::string::npos) {
-            std::string p2 = p1.substr(0, pos2);
-            return p2;
-        }
-    }
-    return {};
-};
+TPMS pod;
+
+bool closed = false;
 
 std::string ExtractManikinIDFromString(std::string in) {
     std::size_t pos = in.find("mid=");
@@ -97,26 +71,6 @@ std::string ExtractManikinIDFromString(std::string in) {
     }
     return DEFAULT_MANIKIN_ID;
 }
-
-std::string gen_random(const int len) {
-    static const char alphanum[] =
-            "0123456789"
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-            "abcdefghijklmnopqrstuvwxyz";
-    std::string tmp_s;
-    tmp_s.reserve(len);
-
-    for (int i = 0; i < len; ++i) {
-        tmp_s += alphanum[rand() % (sizeof(alphanum) - 1)];
-    }
-
-    return tmp_s;
-}
-
-
-TPMS pod;
-
-bool closed = false;
 
 // Override client handler code from Net Server
 void *Server::HandleClient(void *args) {
@@ -203,11 +157,34 @@ void *Server::HandleClient(void *args) {
                         std::string registerVal = str.substr(registerPrefix.size());
                         LOG_INFO << "Client " << c->id
                                  << " registered name: " << registerVal;
+                        vector<string> v = split (registerVal, ';');
+                        auto gc = GetGameClient(c->id);
+                        const auto p1 = std::chrono::system_clock::now();
+                        gc.client_name = c->id;
+                        //gc.learner_name = v[0];
+                        //gc.client_id = v[1];
+                        gc.client_connection = "TCP";
+                        gc.connect_time = std::chrono::duration_cast<std::chrono::seconds>(
+                                p1.time_since_epoch()).count();
+                        UpdateGameClient(c->id, gc);
+
+
                     } else if (str.substr(0, kickPrefix.size()) == kickPrefix) {
                         // kick client
-                        std::string kickVal = str.substr(kickPrefix.size());
+                        std::string kickC = str.substr(kickPrefix.size());
                         LOG_INFO << "Client " << c->id
-                                 << " requested kick of uuid: " << kickVal;
+                                 << " requested kick of uuid: " << kickC;
+                        ConnectionData gc = GetGameClient(kickC);
+
+                        // erase it from the table
+                        auto it=gameClientList.find(kickC);
+                        if (it != gameClientList.end()) {
+                            gameClientList.erase(it);
+                        }
+
+                        AMM::Command cmdInstance;
+                        cmdInstance.message(str);
+                        tmgr->mgr->WriteCommand(cmdInstance);
                     } else if (str.substr(0, statusPrefix.size()) == statusPrefix) {
                         // Client set their status (OPERATIONAL, etc)
                         std::string statusVal;
@@ -357,7 +334,11 @@ void *Server::HandleClient(void *args) {
                             // [AMM_Render_Modification]payload=<RenderModification type="CHOSE_ROLE"/>;participant_id=[role ID as int]:[unique ID as string]:[player name as string]
 
                             if (modType.find("CHOSE_ROLE") != std::string::npos) {
-
+                                auto gc = GetGameClient(c->id);
+                                // gc.role = something
+                                auto v = split(modType, ';');
+                                gc.learner_name = v[0];
+                                UpdateGameClient(c->id, gc);
                             }
 
                             AMM::EventRecord er;
