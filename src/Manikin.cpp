@@ -470,7 +470,7 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
                  << stringOut;
     }
 
-    if (rendModPayload.find("CHOSE_ROLE") == std::string::npos) {
+    if (rendModPayload.find("CHOSE_ROLE") != std::string::npos) {
         // LOG_INFO << "Role chooser, break up participant: " << practitioner;
     }
 
@@ -689,6 +689,33 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             mgr->WriteSimulationControl(simControl);
             std::string tmsg = "ACT=END_SIMULATION_SIM;mid=" + manikin_id;
             s->SendToAll(tmsg);
+        } else if (value.find("ENABLE_REMOTE") != std::string::npos) {
+            std::string remoteData = value.substr(sizeof("ENABLE_REMOTE"));
+            LOG_INFO << "Enabling remote with options:" << remoteData;
+            std::list <std::string> tokenList;
+            split(tokenList, remoteData, boost::algorithm::is_any_of(";"), boost::token_compress_on);
+            std::map <std::string, std::string> kvp;
+
+            BOOST_FOREACH(std::string
+            token, tokenList) {
+                size_t sep_pos = token.find_first_of("=");
+                std::string key = token.substr(0, sep_pos);
+                boost::algorithm::to_lower(key);
+                std::string value = (sep_pos == std::string::npos ? "" : token.substr(
+                        sep_pos + 1,
+                        std::string::npos));
+                kvp[key] = value;
+                LOG_DEBUG << "\t" << key << " => " << kvp[key];
+            }
+
+            std::string session_password;
+            if (kvp.find("password") != kvp.end()) {
+                session_password = kvp["password"];
+                LOG_INFO << "Enabling remote with password " << session_password;
+            } else {
+                LOG_WARNING << "No password set, we can't do anything with this.";
+                return;
+            }
         } else if (value.find("UPDATE_CLIENT") != std::string::npos) {
             std::string clientData = value.substr(sizeof("UPDATE_CLIENT"));
             LOG_INFO << "Updating client with client data:" << clientData;
@@ -746,7 +773,7 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 
         } else if (!value.compare(0, loadScenarioPrefix.size(), loadScenarioPrefix)) {
             currentScenario = value.substr(loadScenarioPrefix.size());
-            // sendConfigToAll(currentScenario);
+            sendConfigToAll(currentScenario);
             std::ostringstream messageOut;
             messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
             s->SendToAll(messageOut.str());

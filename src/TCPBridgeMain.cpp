@@ -33,7 +33,7 @@ std::map <std::string, ConnectionData> gameClientList;
 std::map <std::string, std::string> globalInboundBuffer;
 
 std::string DEFAULT_MANIKIN_ID = "manikin_1";
-
+std::string CORE_ID = "";
 const string capabilityPrefix = "CAPABILITY=";
 const string settingsPrefix = "SETTINGS=";
 const string statusPrefix = "STATUS=";
@@ -165,7 +165,7 @@ void *Server::HandleClient(void *args) {
                         std::string registerVal = str.substr(registerPrefix.size());
                         LOG_INFO << "Client " << c->id
                                  << " registered name: " << registerVal;
-                        vector<string> v = split (registerVal, ';');
+                        vector <string> v = split(registerVal, ';');
 
                     } else if (str.substr(0, kickPrefix.size()) == kickPrefix) {
                         // kick client
@@ -175,7 +175,7 @@ void *Server::HandleClient(void *args) {
                         ConnectionData gc = GetGameClient(kickC);
 
                         // erase it from the table
-                        auto it=gameClientList.find(kickC);
+                        auto it = gameClientList.find(kickC);
                         if (it != gameClientList.end()) {
                             gameClientList.erase(it);
                         }
@@ -207,6 +207,9 @@ void *Server::HandleClient(void *args) {
                         }
                         LOG_INFO << "Client " << c->id << " sent capabilities."; // << capabilityVal;
                         tmgr->HandleCapabilities(c, capabilityVal);
+
+                        std::string coreResp = "CORE=" + CORE_ID;
+                        Server::SendToClient(c, coreResp);
                     } else if (str.substr(0, settingsPrefix.size()) == settingsPrefix) {
                         std::string settingsVal;
                         try {
