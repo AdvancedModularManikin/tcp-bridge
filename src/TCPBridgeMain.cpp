@@ -172,7 +172,7 @@ void *Server::HandleClient(void *args) {
                         gc.learner_name = v[0];
                         gc.client_id = v[1];
                         gc.client_connection = "TCP";
-                        UpdateGameClient(cid, gc);
+                        UpdateGameClient(c->id, gc);
                     } else if (str.substr(0, kickPrefix.size()) == kickPrefix) {
                         // kick client
                         std::string kickC = str.substr(kickPrefix.size());
