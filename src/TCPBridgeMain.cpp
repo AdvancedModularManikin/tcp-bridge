@@ -166,7 +166,15 @@ void *Server::HandleClient(void *args) {
                         LOG_INFO << "Client " << c->id
                                  << " registered name: " << registerVal;
                         vector <string> v = split(registerVal, ';');
-
+// client_id,client_name,learner_name,client_connection,client_type,role,connect_time
+                        vector <string> v = split(registerVal, ';');
+                        auto gc = GetGameClient(c->id);
+                        const auto p1 = std::chrono::system_clock::now();
+                        gc.client_name = c->id;
+                        gc.learner_name = v[0];
+                        gc.client_id = v[1];
+                        gc.client_connection = "TCP";
+                        UpdateGameClient(cid, gc);
                     } else if (str.substr(0, kickPrefix.size()) == kickPrefix) {
                         // kick client
                         std::string kickC = str.substr(kickPrefix.size());
