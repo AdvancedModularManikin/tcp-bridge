@@ -72,6 +72,9 @@ public:
     void MakePrimary();
     void MakeSecondary();
 
+    void sendConfig(Client *c, std::string scene, std::string clientType);
+    void sendConfigToAll(std::string scene);
+
     void ParseCapabilities(tinyxml2::XMLElement *node);
 
     void PublishSettings(std::string const &equipmentType);

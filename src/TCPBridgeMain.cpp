@@ -333,9 +333,9 @@ void *Server::HandleClient(void *args) {
 
                             if (modType.find("CHOSE_ROLE") != std::string::npos) {
                                 auto gc = GetGameClient(c->id);
-                                // gc.role = something
-                                auto v = split(modType, ';');
-                                gc.learner_name = v[0];
+                                auto v = split(modType, ':');
+                                gc.role = v[0];
+                                gc.learner_name = v[2];
                                 UpdateGameClient(c->id, gc);
                             }
 

@@ -68,6 +68,33 @@ void Manikin::SetServer(Server *srv) {
 
 }
 
+void Manikin::sendConfig(Client *c, std::string scene, std::string clientType) {
+    ostringstream static_filename;
+    static_filename << "static/module_configuration_static/" << scene << "_"
+                    << clientType << "_configuration.xml";
+    LOG_DEBUG << "Sending " << static_filename.str() << " to " << c->id;
+    std::ifstream ifs(static_filename.str());
+    std::string configContent((std::istreambuf_iterator<char>(ifs)),
+                              (std::istreambuf_iterator<char>()));
+    std::string encodedConfigContent = Utility::encode64(configContent);
+    std::string encodedConfig = configPrefix + encodedConfigContent + "\n";
+
+    Server::SendToClient(c, encodedConfig);
+}
+
+void Manikin::sendConfigToAll(std::string scene) {
+    auto it = clientMap.begin();
+    while (it != clientMap.end()) {
+        std::string cid = it->first;
+        std::string clientType = clientTypeMap[it->first];
+        Client *c = Server::GetClientByIndex(cid);
+        if (c) {
+            sendConfig(c, scene, clientType);
+        }
+        ++it;
+    }
+}
+
 void Manikin::MakePrimary() {
     LOG_INFO << "Making " << parentId << " into the primary.";
     bp::system("supervisorctl start amm_startup");
@@ -444,7 +471,7 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
     }
 
     if (rendModPayload.find("CHOSE_ROLE") == std::string::npos) {
-        LOG_INFO << "Role chooser, break up participant: " << practitioner;
+        // LOG_INFO << "Role chooser, break up participant: " << practitioner;
     }
 
     auto it = clientMap.begin();
