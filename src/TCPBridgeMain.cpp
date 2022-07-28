@@ -166,8 +166,6 @@ void *Server::HandleClient(void *args) {
                         LOG_INFO << "Client " << c->id
                                  << " registered name: " << registerVal;
                         vector <string> v = split(registerVal, ';');
-// client_id,client_name,learner_name,client_connection,client_type,role,connect_time
-                        vector <string> v = split(registerVal, ';');
                         auto gc = GetGameClient(c->id);
                         const auto p1 = std::chrono::system_clock::now();
                         gc.client_name = c->id;
