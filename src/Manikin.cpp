@@ -729,7 +729,8 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             std::string command = "supervisorctl stop amm_rtc_bridge";
             int result = bp::system(command);
             LOG_INFO << "Service start: " << result;
-
+            std::string tmsg = "REMOTE=ENABLED";
+            s->SendToAll(tmsg);
         } else if (value.find("UPDATE_CLIENT") != std::string::npos) {
             std::string clientData = value.substr(sizeof("UPDATE_CLIENT"));
             LOG_INFO << "Updating client with client data:" << clientData;
