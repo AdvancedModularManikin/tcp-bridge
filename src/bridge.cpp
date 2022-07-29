@@ -71,3 +71,16 @@ std::string ExtractIDFromString(std::string in) {
     }
     return {};
 }
+
+void WritePassword(std::string str) {
+    std::ofstream outfile("/tmp/impactt_sess.hash", std::ofstream::binary | std::ios::out);
+    outfile << str;
+    outfile.close();
+}
+
+std::string ReadPassword() {
+    std::ifstream infile("/tmp/impactt_sess.hash");
+    std::stringstream buffer;
+    buffer << infile.rdbuf();
+    return buffer.str();
+}

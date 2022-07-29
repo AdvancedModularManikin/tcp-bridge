@@ -33,7 +33,9 @@ std::map <std::string, ConnectionData> gameClientList;
 std::map <std::string, std::string> globalInboundBuffer;
 
 std::string DEFAULT_MANIKIN_ID = "manikin_1";
-std::string CORE_ID = "";
+std::string CORE_ID;
+std::string SESSION_PASSWORD;
+
 const string capabilityPrefix = "CAPABILITY=";
 const string settingsPrefix = "SETTINGS=";
 const string statusPrefix = "STATUS=";
@@ -459,6 +461,7 @@ int main(int argc, const char *argv[]) {
     bool podMode = true;
     bool discovery = true;
     int manikinCount = 1;
+    std::string coreId;
     std::string manikinId = DEFAULT_MANIKIN_ID;
 
     namespace po = boost::program_options;
@@ -472,7 +475,8 @@ int main(int argc, const char *argv[]) {
             ("server_port,sp", po::value(&bridgePort)->default_value(9015), "Bridge port")
             ("pod_mode", po::value(&podMode)->default_value(false), "POD mode")
             ("manikin_id", po::value(&manikinId)->default_value("manikin_1"), "Manikin ID")
-            ("manikins", po::value(&manikinCount)->default_value(1));
+            ("manikins", po::value(&manikinCount)->default_value(1))
+            ("core_id", po::value(&coreId)->default_value("AMM_000"), "Core ID");
 
 
     // This isn't set to enforce it, but there are two modes of operation
@@ -498,6 +502,7 @@ int main(int argc, const char *argv[]) {
     }
 
     DEFAULT_MANIKIN_ID = manikinId;
+    CORE_ID = coreId;
 
     LOG_INFO << "=== [AMM - TCP Bridge] ===";
     try {

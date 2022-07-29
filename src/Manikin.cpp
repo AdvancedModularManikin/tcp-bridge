@@ -717,8 +717,9 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             }
 
             if (kvp.find("password") != kvp.end()) {
-                session_password = kvp["password"];
-                LOG_INFO << "Enabling remote with password " << session_password;
+                SESSION_PASSWORD = kvp["password"];
+                LOG_INFO << "Enabling remote with password " << SESSION_PASSWORD;
+                WritePassword(SESSION_PASSWORD);
             } else {
                 LOG_WARNING << "No password set, we can't do anything with this.";
                 return;

@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <fstream>
 #include <map>
+#include <iostream>
+#include <fstream>
+#include <string>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/archive/iterators/base64_from_binary.hpp>
@@ -33,7 +36,6 @@ extern std::map <std::string, std::string> clientTypeMap;
 extern std::map <std::string, std::vector<std::string>> subscribedTopics;
 extern std::map <std::string, std::vector<std::string>> publishedTopics;
 
-
 struct ConnectionData {
     std::string client_id;
     std::string client_name;
@@ -44,15 +46,26 @@ struct ConnectionData {
     int connect_time;
 };
 
+extern std::string SESSION_PASSWORD;
+extern std::string CORE_ID;
 extern std::map <std::string, ConnectionData> gameClientList;
+extern std::string DEFAULT_MANIKIN_ID;
 
 ConnectionData GetGameClient(std::string id);
 
 void UpdateGameClient(std::string id, ConnectionData cData);
-std::vector<std::string> split (const std::string &s, char delim);
+
+std::vector <std::string> split(const std::string &s, char delim);
+
 std::string ExtractTypeFromRenderMod(std::string payload);
+
 std::string ExtractIDFromString(std::string in);
+
 //std::string ExtractManikinIDFromString(std::string in);
 std::string gen_random(const int len);
+
+void WritePassword(std::string str);
+
+std::string ReadPassword();
 
 #endif
