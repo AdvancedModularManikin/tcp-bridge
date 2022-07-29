@@ -178,8 +178,6 @@ void *Server::HandleClient(void *args) {
                         std::string kickC = str.substr(kickPrefix.size());
                         LOG_INFO << "Client " << c->id
                                  << " requested kick of uuid: " << kickC;
-                        ConnectionData gc = GetGameClient(kickC);
-
                         // erase it from the table
                         auto it = gameClientList.find(kickC);
                         if (it != gameClientList.end()) {

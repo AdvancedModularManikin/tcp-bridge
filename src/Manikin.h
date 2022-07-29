@@ -69,6 +69,8 @@ public:
 
     std::string ExtractServiceFromCommand(std::string in);
 
+    std::string session_password;
+
     void MakePrimary();
     void MakeSecondary();
 

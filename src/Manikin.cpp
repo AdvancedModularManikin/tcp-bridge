@@ -671,6 +671,14 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
                 std::string command = "supervisorctl stop " + service;
                 int result = bp::system(command);
             }
+        } else if (value.find("DISABLE_REMOTE") != std::string::npos) {
+            LOG_INFO << "Request to disable Remote / RTC";
+            std::string command = "supervisorctl stop amm_rtc_bridge";
+            int result = bp::system(command);
+            LOG_INFO << "Service stop: " << result;
+
+            std::string tmsg = "REMOTE=DISABLED";
+            s->SendToAll(tmsg);
         } else if (value.find("SET_PRIMARY") != std::string::npos) {
             if (mid == parentId) {
                 // we're the primary
@@ -708,7 +716,6 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
                 LOG_DEBUG << "\t" << key << " => " << kvp[key];
             }
 
-            std::string session_password;
             if (kvp.find("password") != kvp.end()) {
                 session_password = kvp["password"];
                 LOG_INFO << "Enabling remote with password " << session_password;
@@ -716,6 +723,12 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
                 LOG_WARNING << "No password set, we can't do anything with this.";
                 return;
             }
+
+            LOG_INFO << "Request to enable Remote / RTC";
+            std::string command = "supervisorctl stop amm_rtc_bridge";
+            int result = bp::system(command);
+            LOG_INFO << "Service start: " << result;
+
         } else if (value.find("UPDATE_CLIENT") != std::string::npos) {
             std::string clientData = value.substr(sizeof("UPDATE_CLIENT"));
             LOG_INFO << "Updating client with client data:" << clientData;
@@ -791,9 +804,23 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
     } else {
         std::ostringstream messageOut;
         messageOut << "ACT"
-                   << "=" << c.message() << ";mid=" << manikin_id << std::endl;
-        LOG_INFO << "Sending unknown message: " << messageOut.str();
-        s->SendToAll(messageOut.str());
+                   << "=" << c.
+
+                message()
+
+                   << ";mid=" << manikin_id <<
+                   std::endl;
+        LOG_INFO << "Sending unknown message: " << messageOut.
+
+                str();
+
+        s->
+                SendToAll(messageOut
+                                  .
+
+                                          str()
+
+        );
     }
 }
 
@@ -989,8 +1016,7 @@ void Manikin::DispatchRequest(Client *c, std::string const &request, std::string
         std::ostringstream messageOut;
         messageOut << "client_id,client_name,learner_name,client_connection,client_type,role,connect_time" << std::endl;
 
-        for ( const auto &c : gameClientList )
-        {
+        for (const auto &c : gameClientList) {
             ConnectionData clientData = c.second;
             messageOut << clientData.client_id << "," << clientData.client_name << ","
                        << clientData.learner_name << "," << clientData.client_connection << ","
