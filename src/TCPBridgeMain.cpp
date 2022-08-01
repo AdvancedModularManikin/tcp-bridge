@@ -175,6 +175,8 @@ void *Server::HandleClient(void *args) {
                         gc.client_id = v[1];
                         gc.client_connection = "TCP";
                         UpdateGameClient(c->id, gc);
+                        std::string cjm = "CLIENT_JOINED=" + c->id;
+                        Server::SendToAll(cjm);
                     } else if (str.substr(0, kickPrefix.size()) == kickPrefix) {
                         // kick client
                         std::string kickC = str.substr(kickPrefix.size());
