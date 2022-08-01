@@ -181,9 +181,15 @@ void *Server::HandleClient(void *args) {
                         LOG_INFO << "Client " << c->id
                                  << " requested kick of uuid: " << kickC;
                         // erase it from the table
-                        auto it = gameClientList.find(kickC);
-                        if (it != gameClientList.end()) {
-                            gameClientList.erase(it);
+                        for (auto it = gameClientList.cbegin(), next_it = it; it != gameClientList.cend(); it = next_it) {
+                            ++next_it;
+                            std::string cl = it->first;
+                            ConnectionData cd = it->second;
+                            if (kickC == cl) {
+                                LOG_INFO << "Found client, we're removing: " << cd.client_name;
+                                gameClientList.erase(it);
+                                return;
+                            }
                         }
 
                         AMM::Command cmdInstance;
