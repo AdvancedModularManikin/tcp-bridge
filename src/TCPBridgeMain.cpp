@@ -180,7 +180,7 @@ void *Server::HandleClient(void *args) {
                         std::string kickC = str.substr(kickPrefix.size());
                         LOG_INFO << "Client " << c->id
                                  << " requested kick of uuid: " << kickC;
-                        // erase it from the table
+                        // erase it from the table if it exists
                         for (auto it = gameClientList.cbegin(), next_it = it; it != gameClientList.cend(); it = next_it) {
                             ++next_it;
                             std::string cl = it->first;
@@ -188,8 +188,8 @@ void *Server::HandleClient(void *args) {
                             if (kickC == cl) {
                                 LOG_INFO << "Found client, we're removing: " << cd.client_name;
                                 gameClientList.erase(it);
-                                return;
                             }
+
                         }
 
                         AMM::Command cmdInstance;
