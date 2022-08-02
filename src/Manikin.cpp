@@ -729,17 +729,25 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
                 return;
             }
 
-            LOG_INFO << "Request to enable Remote / RTC";
-            std::string command = "supervisorctl restart amm_rtc_bridge";
-            int result = bp::system(command);
-            LOG_INFO << "Service start: " << result;
-            if (result == 0) {
-                std::string tmsg = "REMOTE=ENABLED";
-                s->SendToAll(tmsg);
+            std::string tmsg;
+            if (boost::filesystem::exists("/tmp/disabled")) {
+                LOG_INFO << "Core not authorized for REMOTE.";
+                tmsg = "REMOTE=REJECTED";
+                std::string command = "supervisorctl stop amm_rtc_bridge";
+                int result = bp::system(command);
+                LOG_INFO << "Service stop: " << result;
             } else {
-                std::string tmsg = "REMOTE=DISABLED";
-                s->SendToAll(tmsg);
+                LOG_INFO << "Request to enable Remote / RTC";
+                std::string command = "supervisorctl restart amm_rtc_bridge";
+                int result = bp::system(command);
+                LOG_INFO << "Service start: " << result;
+                if (result == 0) {
+                    tmsg = "REMOTE=ENABLED";
+                } else {
+                    tmsg = "REMOTE=DISABLED";
+                }
             }
+            s->SendToAll(tmsg);
         } else if (value.find("UPDATE_CLIENT") != std::string::npos) {
             std::string clientData = value.substr(sizeof("UPDATE_CLIENT"));
             LOG_INFO << "Updating client with client data:" << clientData;
