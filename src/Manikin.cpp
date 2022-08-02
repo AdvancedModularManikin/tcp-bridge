@@ -625,17 +625,20 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             // } else if (value.find("PUBLISH_ASSESSMENT") != std::string::npos) {
             //     LOG_INFO << "Command to publish assessments: " << value;
         } else if (value.find("RESTART_SERVICE") != std::string::npos) {
-            if (mid == parentId) {
+            if (mid == parentId || podMode == false) {
                 std::string service = ExtractServiceFromCommand(value);
                 LOG_INFO << "Command to restart service " << service;
                 if (service.find("all") != std::string::npos) {
                     LOG_INFO << "Restarting all services, which is like assigning primary.";
-                    if (mid == parentId) {
+                    if (podMode && mid == parentId) {
                         // we're the primary
                         MakePrimary();
-                    } else {
+                    } elseif (podMode) {
                         // we're a secondary
                         MakeSecondary();
+                    } else {
+                        std::string command = "supervisorctl restart " + service;
+                        int result = bp::system(command);
                     }
                 } else {
                     LOG_INFO << "Restarting single service.";
