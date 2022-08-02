@@ -784,8 +784,17 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 
         } else if (value.find("KICK") != std::string::npos) {
             std::string kickC = value.substr(sizeof("KICK"));
-            LOG_INFO << "Got kick via DDS bus command, let's not doing anything with that.";
+            LOG_INFO << "Got kick via DDS bus command.";
+            for (auto it = gameClientList.cbegin(), next_it = it; it != gameClientList.cend(); it = next_it) {
+                ++next_it;
+                std::string cl = it->first;
+                ConnectionData cd = it->second;
+                if (kickC == cl) {
+                    LOG_INFO << "Found client, we're removing: " << cd.client_name;
+                    gameClientList.erase(it);
+                }
 
+            }
         } else if (!value.compare(0, loadScenarioPrefix.size(), loadScenarioPrefix)) {
             currentScenario = value.substr(loadScenarioPrefix.size());
             sendConfigToAll(currentScenario);
