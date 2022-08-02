@@ -795,6 +795,9 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             if (kvp.find("connect_time") != kvp.end()) {
                 gc.connect_time = stoi(kvp["connect_time"]);
             }
+            if (kvp.find("client_status") != kvp.end()) {
+                gc.client_status = kvp["client_status"];
+            }
 
             LOG_INFO << "Updating client " << client_id;
             UpdateGameClient(client_id, gc);

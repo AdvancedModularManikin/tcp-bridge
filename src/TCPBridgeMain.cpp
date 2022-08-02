@@ -174,6 +174,7 @@ void *Server::HandleClient(void *args) {
                         gc.learner_name = v[0];
                         gc.client_id = v[1];
                         gc.client_connection = "TCP";
+                        gc.client_status = "CONNECTED";
                         UpdateGameClient(c->id, gc);
                         std::string cjm = "CLIENT_JOINED=" + c->id;
                         Server::SendToAll(cjm);

@@ -42,6 +42,7 @@ struct ConnectionData {
     std::string learner_name;
     std::string client_connection;
     std::string client_type;
+    std::string client_status;
     std::string role;
     int connect_time;
 };
