@@ -679,9 +679,10 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             std::string command = "supervisorctl stop amm_rtc_bridge";
             int result = bp::system(command);
             LOG_INFO << "Service stop: " << result;
-
-            std::string tmsg = "REMOTE=DISABLED";
-            s->SendToAll(tmsg);
+            if (result == 0) {
+                std::string tmsg = "REMOTE=DISABLED";
+                s->SendToAll(tmsg);
+            }
         } else if (value.find("SET_PRIMARY") != std::string::npos) {
             if (mid == parentId) {
                 // we're the primary
@@ -732,8 +733,13 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             std::string command = "supervisorctl restart amm_rtc_bridge";
             int result = bp::system(command);
             LOG_INFO << "Service start: " << result;
-            std::string tmsg = "REMOTE=ENABLED";
-            s->SendToAll(tmsg);
+            if (result == 0) {
+                std::string tmsg = "REMOTE=ENABLED";
+                s->SendToAll(tmsg);
+            } else {
+                std::string tmsg = "REMOTE=DISABLED";
+                s->SendToAll(tmsg);
+            }
         } else if (value.find("UPDATE_CLIENT") != std::string::npos) {
             std::string clientData = value.substr(sizeof("UPDATE_CLIENT"));
             LOG_INFO << "Updating client with client data:" << clientData;
