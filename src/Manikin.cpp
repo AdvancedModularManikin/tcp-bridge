@@ -633,7 +633,7 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
                     if (podMode && mid == parentId) {
                         // we're the primary
                         MakePrimary();
-                    } elseif (podMode) {
+                    } else if (podMode) {
                         // we're a secondary
                         MakeSecondary();
                     } else {
