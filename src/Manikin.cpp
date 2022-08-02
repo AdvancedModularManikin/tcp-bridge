@@ -729,7 +729,7 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             }
 
             LOG_INFO << "Request to enable Remote / RTC";
-            std::string command = "supervisorctl stop amm_rtc_bridge";
+            std::string command = "supervisorctl restart amm_rtc_bridge";
             int result = bp::system(command);
             LOG_INFO << "Service start: " << result;
             std::string tmsg = "REMOTE=ENABLED";
