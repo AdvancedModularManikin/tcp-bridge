@@ -8,6 +8,7 @@
 
 #include <map>
 
+
 #include "Net/Server.h"
 #include "Net/Client.h"
 
@@ -71,7 +72,7 @@ public:
 
     void MakePrimary();
     void MakeSecondary();
-
+    bool isAuthorized();
     void sendConfig(Client *c, std::string scene, std::string clientType);
     void sendConfigToAll(std::string scene);
 

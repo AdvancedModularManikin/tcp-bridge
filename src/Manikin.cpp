@@ -730,7 +730,7 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             }
 
             std::string tmsg;
-            if (boost::filesystem::exists("/tmp/disabled")) {
+            if (!isAuthorized()) {
                 LOG_INFO << "Core not authorized for REMOTE.";
                 tmsg = "REMOTE=REJECTED";
                 std::string command = "supervisorctl stop amm_rtc_bridge";
@@ -849,6 +849,15 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
                                           str()
 
         );
+    }
+}
+
+bool Manikin::isAuthorized() {
+    std::ifstream infile("/tmp/disabled");
+    if (infile.good()) {
+        return false;
+    } else {
+        return true;
     }
 }
 
