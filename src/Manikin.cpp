@@ -799,6 +799,9 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             LOG_INFO << "Updating client " << client_id;
             UpdateGameClient(client_id, gc);
 
+            std::ostringstream messageOut;
+            messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
+            s->SendToAll(messageOut.str());
         } else if (value.find("KICK") != std::string::npos) {
             std::string kickC = value.substr(sizeof("KICK"));
             LOG_INFO << "Got kick via DDS bus command.";
