@@ -1063,7 +1063,7 @@ void Manikin::DispatchRequest(Client *c, std::string const &request, std::string
             ConnectionData clientData = c.second;
             messageOut << clientData.client_id << "," << clientData.client_name << ","
                        << clientData.learner_name << "," << clientData.client_connection << ","
-                       << clientData.client_type << "," << clientData.role << "," <<
+                       << clientData.client_type << "," << clientData.role << ","
                        << clientData.client_status << "," <<
                        clientData.connect_time << std::endl;
             // LOG_TRACE << messageOut.str();
