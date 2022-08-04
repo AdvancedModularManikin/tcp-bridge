@@ -11,8 +11,10 @@ ConnectionData GetGameClient(std::string id) {
     }
 }
 
+
 void UpdateGameClient(std::string id, ConnectionData cData) {
     gameClientList.insert_or_assign(id, cData);
+    // PublishClientDataUpdate(cData);
 }
 
 std::vector<std::string> split (const std::string &s, char delim) {

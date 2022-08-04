@@ -179,6 +179,21 @@ void *Server::HandleClient(void *args) {
                         std::ostringstream cjm;
                         cjm << "CLIENT_JOINED=" << c->id << std::endl;
                         Server::SendToAll(cjm.str());
+
+                        std::ostringstream m;
+                        m << "[SYS]UPDATE_CLIENT=";
+                        m << "client_id=" << gc.client_id;
+                        m << ";client_name=" << gc.client_name;
+                        m << ";learner_name=" << gc.learner_name;
+                        m << ";client_connection=" << gc.client_connection;
+                        m << ";client_type=" << gc.client_type;
+                        m << ";role=" << gc.role;
+                        m << ";client_status=" << gc.client_status;
+                        m << ";connect_time=" << gc.connect_time;
+
+                        AMM::Command cmdInstance;
+                        cmdInstance.message(m.str());
+                        tmgr->mgr->WriteCommand(cmdInstance);
                     } else if (str.substr(0, kickPrefix.size()) == kickPrefix) {
                         // kick client
                         std::string kickC = str.substr(kickPrefix.size());
@@ -356,7 +371,24 @@ void *Server::HandleClient(void *args) {
                                 auto v = split(modType, ':');
                                 gc.role = v[0];
                                 gc.learner_name = v[2];
+
+
                                 UpdateGameClient(c->id, gc);
+
+                                std::ostringstream m;
+                                m << "[SYS]UPDATE_CLIENT=";
+                                m << "client_id=" << gc.client_id;
+                                m << ";client_name=" << gc.client_name;
+                                m << ";learner_name=" << gc.learner_name;
+                                m << ";client_connection=" << gc.client_connection;
+                                m << ";client_type=" << gc.client_type;
+                                m << ";role=" << gc.role;
+                                m << ";client_status=" << gc.client_status;
+                                m << ";connect_time=" << gc.connect_time;
+
+                                AMM::Command cmdInstance;
+                                cmdInstance.message(m.str());
+                                tmgr->mgr->WriteCommand(cmdInstance);
                             }
 
                             AMM::EventRecord er;
