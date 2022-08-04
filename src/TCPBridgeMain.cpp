@@ -176,8 +176,9 @@ void *Server::HandleClient(void *args) {
                         gc.client_connection = "TCP";
                         gc.client_status = "CONNECTED";
                         UpdateGameClient(c->id, gc);
-                        std::string cjm = "CLIENT_JOINED=" + c->id;
-                        Server::SendToAll(cjm);
+                        std::ostringstream cjm;
+                        cjm << "CLIENT_JOINED=" << c->id << std::endl;
+                        Server::SendToAll(cjm.str());
                     } else if (str.substr(0, kickPrefix.size()) == kickPrefix) {
                         // kick client
                         std::string kickC = str.substr(kickPrefix.size());
@@ -223,8 +224,9 @@ void *Server::HandleClient(void *args) {
                         LOG_INFO << "Client " << c->id << " sent capabilities."; // << capabilityVal;
                         tmgr->HandleCapabilities(c, capabilityVal);
 
-                        std::string coreResp = "CORE=" + CORE_ID;
-                        Server::SendToClient(c, coreResp);
+                        std::ostringstream coreResp;
+                        coreResp << "CORE=" << CORE_ID << std::endl;
+                        Server::SendToClient(c, coreResp.str());
                     } else if (str.substr(0, settingsPrefix.size()) == settingsPrefix) {
                         std::string settingsVal;
                         try {

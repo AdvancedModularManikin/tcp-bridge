@@ -678,8 +678,9 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
             int result = bp::system(command);
             LOG_INFO << "Service stop: " << result;
             if (result == 0) {
-                std::string tmsg = "REMOTE=DISABLED";
-                s->SendToAll(tmsg);
+                std::ostringstream tmsg;
+                tmsg << "REMOTE=DISABLED" << std::endl;
+                s->SendToAll(tmsg.str());
             }
         } else if (value.find("SET_PRIMARY") != std::string::npos) {
             if (mid == parentId) {
@@ -727,10 +728,10 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
                 return;
             }
 
-            std::string tmsg;
+            std::ostringstream tmsg;
             if (!isAuthorized()) {
                 LOG_INFO << "Core not authorized for REMOTE.";
-                tmsg = "REMOTE=REJECTED";
+                tmsg << "REMOTE=REJECTED" << std::endl;
                 std::string command = "supervisorctl stop amm_rtc_bridge";
                 int result = bp::system(command);
                 LOG_INFO << "Service stop: " << result;
@@ -740,12 +741,12 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
                 int result = bp::system(command);
                 LOG_INFO << "Service start: " << result;
                 if (result == 0) {
-                    tmsg = "REMOTE=ENABLED";
+                    tmsg << "REMOTE=ENABLED" << std::endl;
                 } else {
-                    tmsg = "REMOTE=DISABLED";
+                    tmsg << "REMOTE=DISABLED" << std::endl;
                 }
             }
-            s->SendToAll(tmsg);
+            s->SendToAll(tmsg.str());
         } else if (value.find("UPDATE_CLIENT") != std::string::npos) {
             std::string clientData = value.substr(sizeof("UPDATE_CLIENT"));
             LOG_INFO << "Updating client with client data:" << clientData;
