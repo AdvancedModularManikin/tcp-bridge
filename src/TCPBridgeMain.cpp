@@ -367,28 +367,7 @@ void *Server::HandleClient(void *args) {
                             // [AMM_Render_Modification]payload=<RenderModification type="CHOSE_ROLE"/>;participant_id=[role ID as int]:[unique ID as string]:[player name as string]
 
                             if (modType.find("CHOSE_ROLE") != std::string::npos) {
-                                auto gc = GetGameClient(c->id);
-                                auto v = split(modType, ':');
-                                gc.role = v[0];
-                                gc.learner_name = v[2];
 
-
-                                UpdateGameClient(c->id, gc);
-
-                                std::ostringstream m;
-                                m << "[SYS]UPDATE_CLIENT=";
-                                m << "client_id=" << gc.client_id;
-                                m << ";client_name=" << gc.client_name;
-                                m << ";learner_name=" << gc.learner_name;
-                                m << ";client_connection=" << gc.client_connection;
-                                m << ";client_type=" << gc.client_type;
-                                m << ";role=" << gc.role;
-                                m << ";client_status=" << gc.client_status;
-                                m << ";connect_time=" << gc.connect_time;
-
-                                AMM::Command cmdInstance;
-                                cmdInstance.message(m.str());
-                                tmgr->mgr->WriteCommand(cmdInstance);
                             }
 
                             AMM::EventRecord er;

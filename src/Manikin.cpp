@@ -469,7 +469,74 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
     }
 
     if (rendModPayload.find("CHOSE_ROLE") != std::string::npos) {
-        // LOG_INFO << "Role chooser, break up participant: " << practitioner;
+        std::string manikin_id, topic, message, modType, modLocation, modPayload, modLearner, modInfo;
+        std::list <std::string> tokenList;
+        split(tokenList, rendModPayload, boost::algorithm::is_any_of(";"), boost::token_compress_on);
+        std::map <std::string, std::string> kvp;
+
+        BOOST_FOREACH(std::string
+        token, tokenList) {
+            size_t sep_pos = token.find_first_of("=");
+            std::string key = token.substr(0, sep_pos);
+            boost::algorithm::to_lower(key);
+            std::string value = (sep_pos == std::string::npos ? "" : token.substr(
+                    sep_pos + 1,
+                    std::string::npos));
+            kvp[key] = value;
+            LOG_DEBUG << "\t" << key << " => " << kvp[key];
+        }
+
+
+        auto type = kvp.find("type");
+        if (type != kvp.end()) {
+            modType = type->second;
+        }
+
+        auto location = kvp.find("location");
+        if (location != kvp.end()) {
+            modLocation = location->second;
+        }
+
+        auto participant_id = kvp.find("participant_id");
+        if (participant_id != kvp.end()) {
+            modLearner = participant_id->second;
+        }
+
+        if (modLearner.front() == '"') {
+            modLearner.erase(0, 1); // erase the first character
+            modLearner.erase(modLearner.size() - 1); // erase the last character
+        }
+
+        auto payload = kvp.find("payload");
+        if (payload != kvp.end()) {
+            modPayload = payload->second;
+        }
+
+        auto info = kvp.find("info");
+        if (info != kvp.end()) {
+            modInfo = info->second;
+        }
+
+        auto v = split(modType, ':');
+        auto gc = GetGameClient(v[1]);
+        gc.role = v[0];
+        gc.learner_name = v[2];
+        UpdateGameClient(v[1], gc);
+
+        std::ostringstream m;
+        m << "[SYS]UPDATE_CLIENT=";
+        m << "client_id=" << gc.client_id;
+        m << ";client_name=" << gc.client_name;
+        m << ";learner_name=" << gc.learner_name;
+        m << ";client_connection=" << gc.client_connection;
+        m << ";client_type=" << gc.client_type;
+        m << ";role=" << gc.role;
+        m << ";client_status=" << gc.client_status;
+        m << ";connect_time=" << gc.connect_time;
+
+        AMM::Command cmdInstance;
+        cmdInstance.message(m.str());
+        mgr->WriteCommand(cmdInstance);
     }
 
     auto it = clientMap.begin();
