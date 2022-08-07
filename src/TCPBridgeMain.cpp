@@ -123,6 +123,26 @@ void *Server::HandleClient(void *args) {
             auto gc = GetGameClient(c->id);
             gc.client_status = "DISCONNECTED";
             UpdateGameClient(c->id, gc);
+            std::ostringstream m;
+            m << "[SYS]UPDATE_CLIENT=";
+            m << "client_id=" << gc.client_id;
+            m << ";client_name=" << gc.client_name;
+            m << ";learner_name=" << gc.learner_name;
+            m << ";client_connection=" << gc.client_connection;
+            m << ";client_type=" << gc.client_type;
+            m << ";role=" << gc.role;
+            m << ";client_status=" << gc.client_status;
+            m << ";connect_time=" << gc.connect_time;
+
+            auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
+            if (tmgr == NULL) {
+                LOG_WARNING << "Can't send disconnection update to manikin.";
+            } else {
+// send the disconnect message
+                AMM::Command cmdInstance;
+                cmdInstance.message(m.str());
+                tmgr->mgr->WriteCommand(cmdInstance);
+            }
 
             for (auto it = gameClientList.cbegin(), next_it = it; it != gameClientList.cend(); it = next_it) {
                 ++next_it;
@@ -215,7 +235,8 @@ void *Server::HandleClient(void *args) {
                         LOG_INFO << "Client " << c->id
                                  << " requested kick of uuid: " << kickC;
                         // erase it from the table if it exists
-                        for (auto it = gameClientList.cbegin(), next_it = it; it != gameClientList.cend(); it = next_it) {
+                        for (auto it = gameClientList.cbegin(), next_it = it;
+                             it != gameClientList.cend(); it = next_it) {
                             ++next_it;
                             std::string cl = it->first;
                             ConnectionData cd = it->second;
