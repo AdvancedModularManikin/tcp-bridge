@@ -69,7 +69,7 @@ public:
     AMM::DDSManager <Manikin> *mgr;
 
     std::string ExtractServiceFromCommand(std::string in);
-
+    std::string ExtractType(std::string in);
     void MakePrimary();
     void MakeSecondary();
     bool isAuthorized();

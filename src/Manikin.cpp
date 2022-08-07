@@ -106,6 +106,20 @@ void Manikin::MakeSecondary() {
 
 }
 
+std::string Manikin::ExtractType(std::string in) {
+    std::size_t pos = in.find("type=");
+    if (pos != std::string::npos) {
+        std::string mid1 = in.substr(pos + 5);
+        std::size_t pos1 = mid1.find(";");
+        if (pos1 != std::string::npos) {
+            std::string mid2 = mid1.substr(0, pos1);
+            return mid2;
+        }
+        return mid1;
+    }
+    return {};
+}
+
 std::string Manikin::ExtractServiceFromCommand(std::string in) {
     std::size_t pos = in.find("service=");
     if (pos != std::string::npos) {
@@ -469,59 +483,15 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
     }
 
     if (rendModPayload.find("CHOSE_ROLE") != std::string::npos) {
-        std::string manikin_id, topic, message, modType, modLocation, modPayload, modLearner, modInfo;
-        std::list <std::string> tokenList;
-        split(tokenList, rendModPayload, boost::algorithm::is_any_of(";"), boost::token_compress_on);
-        std::map <std::string, std::string> kvp;
-
-        BOOST_FOREACH(std::string
-        token, tokenList) {
-            size_t sep_pos = token.find_first_of("=");
-            std::string key = token.substr(0, sep_pos);
-            boost::algorithm::to_lower(key);
-            std::string value = (sep_pos == std::string::npos ? "" : token.substr(
-                    sep_pos + 1,
-                    std::string::npos));
-            kvp[key] = value;
-            LOG_DEBUG << "\t" << key << " => " << kvp[key];
-        }
-
-
-        auto type = kvp.find("type");
-        if (type != kvp.end()) {
-            modType = type->second;
-        }
-
-        auto location = kvp.find("location");
-        if (location != kvp.end()) {
-            modLocation = location->second;
-        }
-
-        auto participant_id = kvp.find("participant_id");
-        if (participant_id != kvp.end()) {
-            modLearner = participant_id->second;
-        }
-
-        if (modLearner.front() == '"') {
-            modLearner.erase(0, 1); // erase the first character
-            modLearner.erase(modLearner.size() - 1); // erase the last character
-        }
-
-        auto payload = kvp.find("payload");
-        if (payload != kvp.end()) {
-            modPayload = payload->second;
-        }
-
-        auto info = kvp.find("info");
-        if (info != kvp.end()) {
-            modInfo = info->second;
-        }
-
-        auto v = split(modType, ':');
-        auto gc = GetGameClient(v[1]);
-        gc.role = v[0];
-        gc.learner_name = v[2];
-        UpdateGameClient(v[1], gc);
+        LOG_INFO << "Role chooser, break up participant: " << practitioner;
+        std::vector <std::string> participant_data = split(practitioner, ':');
+        std::string pid = participant_data[1];
+        ConnectionData gc = GetGameClient(pid);
+        const auto p1 = std::chrono::system_clock::now();
+        gc.role = participant_data[0];
+        gc.learner_name = participant_data[2];
+        LOG_INFO << "Updating client to role " << gc.role;
+        UpdateGameClient(pid, gc);
 
         std::ostringstream m;
         m << "[SYS]UPDATE_CLIENT=";
