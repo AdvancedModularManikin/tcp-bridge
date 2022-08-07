@@ -120,6 +120,21 @@ void *Server::HandleClient(void *args) {
             Server::clients.erase(Server::clients.begin() + index);
             ServerThread::UnlockMutex(uuid);
 
+            auto gc = GetGameClient(c->id);
+            gc.client_status = "DISCONNECTED";
+            UpdateGameClient(c->id, gc);
+
+            for (auto it = gameClientList.cbegin(), next_it = it; it != gameClientList.cend(); it = next_it) {
+                ++next_it;
+                std::string cl = it->first;
+                ConnectionData cd = it->second;
+                if (c->id == cl) {
+                    LOG_INFO << "Found client, we're removing: " << cd.client_name;
+                    gameClientList.erase(it);
+                }
+
+            }
+
             // Remove from our client/UUID map
             LOG_DEBUG << "Erasing from client map";
             auto it = clientMap.find(c->id);
