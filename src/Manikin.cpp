@@ -97,12 +97,16 @@ void Manikin::sendConfigToAll(std::string scene) {
 
 void Manikin::MakePrimary() {
     LOG_INFO << "Making " << parentId << " into the primary.";
-    bp::system("supervisorctl stop all && supervisorctl start amm_startup && supervisorctl start amm_tpms_bridge");
+    bp::system("supervisorctl stop all");
+    bp::system("supervisorctl start amm_startup");
+    bp::system("supervisorctl start amm_tpms_bridge");
 }
 
 void Manikin::MakeSecondary() {
     LOG_INFO << "Making " << parentId << " into a secondary.";
-    bp::system("supervisorctl stop all && supervisorctl start amm_startup && supervisorctl stop amm_tpms_bridge");
+    bp::system("supervisorctl stop all");
+    bp::system("supervisorctl start amm_startup");
+    bp::system("supervisorctl stop amm_tpms_bridge");
 
 }
 
