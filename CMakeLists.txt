@@ -10,8 +10,8 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/cmake)
 
 set(VERSION_TYPE "beta" CACHE STRING "version type" FORCE)
 set(PROJECT_VERSION_MAJOR 1)
-set(PROJECT_VERSION_MINOR 1)
-set(PROJECT_VERSION_PATCH 14)
+set(PROJECT_VERSION_MINOR 2)
+set(PROJECT_VERSION_PATCH 0)
 site_name(VERSION_HOST) # read hostname to VERSION_HOST
 set(VERSION_HOST "${VERSION_HOST}" CACHE STRING "host of build" FORCE)
 
@@ -83,3 +83,6 @@ message(STATUS "Output:               ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 message(STATUS "Compiler:             ${CMAKE_CXX_COMPILER}")
 message(STATUS "CMAKE_BUILD_TYPE:     ${CMAKE_BUILD_TYPE}")
 message(STATUS "")
+
+include(Packing)
+

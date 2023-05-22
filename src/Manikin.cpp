@@ -196,7 +196,7 @@ void Manikin::onNewModuleConfiguration(AMM::ModuleConfiguration &mc, SampleInfo_
         if (clientType.find(mc.name()) != std::string::npos || mc.name() == "metadata") {
             Client *c = Server::GetClientByIndex(cid);
             if (c) {
-                std::string encodedConfigContent = Utility::encode64(mc.capabilities_configuration());
+                std::string encodedConfigContent = Utility::encode64(mc.capabilities_configuration().to_string());
                 std::ostringstream encodedConfig;
                 encodedConfig << configPrefix << encodedConfigContent << ";mid=" << manikin_id << std::endl;
                 Server::SendToClient(c, encodedConfig.str());
@@ -460,11 +460,12 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
     std::ostringstream messageOut;
     std::string rendModPayload;
     std::string rendModType;
-    if (rendMod.data().empty()) {
+    std::string rendModData = rendMod.data().to_string();
+    if (rendModData.empty()) {
         rendModPayload = "<RenderModification type='" + rendMod.type() + "'/>";
         rendModType = "";
     } else {
-        rendModPayload = rendMod.data();
+        rendModPayload = rendModData;
         // rendModType = rendMod.type();
         rendModType = "";
     }
@@ -580,7 +581,7 @@ void Manikin::onNewOperationalDescription(AMM::OperationalDescription &opD, Samp
     // [AMM_OperationalDescription]name=;description=;manufacturer=;model=;serial_number=;module_id=;module_version=;configuration_version=;AMM_version=;capabilities_configuration=(BASE64 ENCODED STRING - URLSAFE)
 
     std::ostringstream messageOut;
-    std::string capabilities = Utility::encode64(opD.capabilities_schema());
+    std::string capabilities = Utility::encode64(opD.capabilities_schema().to_string());
 
     messageOut << "[AMM_OperationalDescription]"
                << "name=" << opD.name() << ";"
