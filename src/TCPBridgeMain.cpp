@@ -24,13 +24,13 @@ using namespace eprosima::fastrtps::rtps;
 
 Server *s;
 
-std::map <std::string, std::string> clientMap;
-std::map <std::string, std::string> clientTypeMap;
+std::map<std::string, std::string> clientMap;
+std::map<std::string, std::string> clientTypeMap;
 
-std::map <std::string, std::vector<std::string>> subscribedTopics;
-std::map <std::string, std::vector<std::string>> publishedTopics;
-std::map <std::string, ConnectionData> gameClientList;
-std::map <std::string, std::string> globalInboundBuffer;
+std::map<std::string, std::vector<std::string>> subscribedTopics;
+std::map<std::string, std::vector<std::string>> publishedTopics;
+std::map<std::string, ConnectionData> gameClientList;
+std::map<std::string, std::string> globalInboundBuffer;
 
 std::string DEFAULT_MANIKIN_ID = "manikin_1";
 std::string CORE_ID;
@@ -61,530 +61,439 @@ TPMS pod;
 bool closed = false;
 
 std::string ExtractManikinIDFromString(std::string in) {
-    std::size_t pos = in.find("mid=");
-    if (pos != std::string::npos) {
-        std::string mid1 = in.substr(pos + 4);
-        std::size_t pos1 = mid1.find(";");
-        if (pos1 != std::string::npos) {
-            std::string mid2 = mid1.substr(0, pos1);
-            return mid2;
-        }
-        return mid1;
-    }
-    return DEFAULT_MANIKIN_ID;
+	std::size_t pos = in.find("mid=");
+	if (pos != std::string::npos) {
+		std::string mid1 = in.substr(pos + 4);
+		std::size_t pos1 = mid1.find(";");
+		if (pos1 != std::string::npos) {
+			std::string mid2 = mid1.substr(0, pos1);
+			return mid2;
+		}
+		return mid1;
+	}
+	return DEFAULT_MANIKIN_ID;
 }
 
-// Override client handler code from Net Server
+
+void broadcastDisconnection(const ConnectionData &gc) {
+	std::ostringstream message;
+	message << "[SYS]UPDATE_CLIENT=";
+	message << "client_id=" << gc.client_id << ";client_name=" << gc.client_name;
+	message << ";learner_name=" << gc.learner_name << ";client_connection=" << gc.client_connection;
+	message << ";client_type=" << gc.client_type << ";role=" << gc.role;
+	message << ";client_status=" << gc.client_status << ";connect_time=" << gc.connect_time;
+
+	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
+	if (tmgr) {
+		AMM::Command cmdInstance;
+		cmdInstance.message(message.str());
+		tmgr->mgr->WriteCommand(cmdInstance);
+	} else {
+		LOG_WARNING << "Cannot send disconnection update to manikin.";
+	}
+}
+
+void handleClientDisconnection(Client *c, const std::string &uuid) {
+	// Clean up socket and remove client from server resources
+	shutdown(c->sock, SHUT_RDWR);
+	close(c->sock);
+
+	// Mutex-protected client removal
+	ServerThread::LockMutex(uuid);
+	int index = Server::FindClientIndex(c);
+	if (index != -1) {
+		LOG_DEBUG << "Erasing client at position " << index << " with id " << Server::clients[index].id;
+		Server::clients.erase(Server::clients.begin() + index);
+	}
+	clientMap.erase(c->id);
+	ServerThread::UnlockMutex(uuid);
+
+	// Update game client status to DISCONNECTED
+	ConnectionData gc = GetGameClient(c->id);
+	gc.client_status = "DISCONNECTED";
+	UpdateGameClient(c->id, gc);
+	broadcastDisconnection(gc);
+}
+
+// Handler for client registration
+void handleRegisterMessage(Client *c, const std::string &message) {
+	std::string registerVal = message.substr(registerPrefix.size());
+	LOG_INFO << "Client " << c->id << " registered name: " << registerVal;
+
+	// Parse client registration data
+	auto parts = split(registerVal, ';');
+	if (parts.size() >= 2) {
+		auto gc = GetGameClient(c->id);
+		gc.client_name = parts[0];
+		gc.learner_name = parts[1];
+		gc.client_status = "CONNECTED";
+		UpdateGameClient(c->id, gc);
+	} else {
+		LOG_WARNING << "Malformed registration message: " << registerVal;
+	}
+
+	// Notify all clients of new registration
+	std::ostringstream joinMessage;
+	joinMessage << "CLIENT_JOINED=" << c->id << std::endl;
+	Server::SendToAll(joinMessage.str());
+}
+
+// Handler for kicking a client
+void handleKickMessage(Client *c, const std::string &message) {
+	std::string kickId = message.substr(kickPrefix.size());
+	LOG_INFO << "Client " << c->id << " requested kick of client ID: " << kickId;
+
+	auto it = gameClientList.find(kickId);
+	if (it != gameClientList.end()) {
+		LOG_INFO << "Removing client: " << it->second.client_name;
+		gameClientList.erase(it);
+	} else {
+		LOG_WARNING << "Attempted to kick non-existent client ID: " << kickId;
+	}
+
+	// Notify other modules of the kick action
+	AMM::Command cmdInstance;
+	cmdInstance.message("KICK_CLIENT=" + kickId);
+	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
+	if (tmgr) tmgr->mgr->WriteCommand(cmdInstance);
+}
+
+// Handler for setting client status
+void handleStatusMessage(Client *c, const std::string &message) {
+	std::string encodedStatus = message.substr(statusPrefix.size());
+	std::string status;
+	try {
+		status = Utility::decode64(encodedStatus);
+	} catch (std::exception &e) {
+		LOG_ERROR << "Error decoding base64 status message: " << e.what();
+		return;
+	}
+
+	LOG_DEBUG << "Client " << c->id << " set status: " << status;
+	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
+	if (tmgr) tmgr->HandleStatus(c, status);
+}
+
+// Handler for client capabilities announcement
+void handleCapabilityMessage(Client *c, const std::string &message) {
+	std::string encodedCapabilities = message.substr(capabilityPrefix.size());
+	std::string capabilities;
+	try {
+		capabilities = Utility::decode64(encodedCapabilities);
+	} catch (std::exception &e) {
+		LOG_ERROR << "Error decoding base64 capabilities: " << e.what();
+		return;
+	}
+
+	LOG_INFO << "Client " << c->id << " sent capabilities: " << capabilities;
+	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
+	if (tmgr) tmgr->HandleCapabilities(c, capabilities);
+
+	// Send acknowledgment
+	std::ostringstream ack;
+	ack << "CAPABILITIES_RECEIVED=" << c->id << std::endl;
+	Server::SendToClient(c, ack.str());
+}
+
+// Handler for client settings message
+void handleSettingsMessage(Client *c, const std::string &message) {
+	std::string encodedSettings = message.substr(settingsPrefix.size());
+	std::string settings;
+	try {
+		settings = Utility::decode64(encodedSettings);
+	} catch (std::exception &e) {
+		LOG_ERROR << "Error decoding base64 settings: " << e.what();
+		return;
+	}
+
+	LOG_INFO << "Client " << c->id << " sent settings: " << settings;
+	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
+	if (tmgr) tmgr->HandleSettings(c, settings);
+}
+
+// Handler for client requests
+void handleRequestMessage(Client *c, const std::string &message) {
+	std::string request = message.substr(requestPrefix.size());
+	LOG_INFO << "Client " << c->id << " sent request: " << request;
+	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
+	if (tmgr) tmgr->DispatchRequest(c, request);
+}
+
+// Handler for client actions
+void handleActionMessage(Client *c, const std::string &message) {
+	std::string action = message.substr(actionPrefix.size());
+	LOG_INFO << "Client " << c->id << " sent action: " << action;
+
+	// Broadcast action as an AMM Command
+	AMM::Command cmdInstance;
+	cmdInstance.message(action);
+	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
+	if (tmgr) tmgr->mgr->WriteCommand(cmdInstance);
+}
+
+void parseKeyValuePairs(const std::string &message, std::map<std::string, std::string> &kvp) {
+	// Split the message into tokens based on semicolons
+	std::vector<std::string> tokens;
+	boost::split(tokens, message, boost::is_any_of(";"), boost::token_compress_on);
+
+	// Process each token to extract key-value pairs
+	for (const auto &token: tokens) {
+		size_t sep_pos = token.find('=');
+		if (sep_pos != std::string::npos) {
+			std::string key = token.substr(0, sep_pos);
+			std::string value = token.substr(sep_pos + 1);
+
+			// Trim whitespace and convert key to lowercase for consistency
+			boost::trim(key);
+			boost::trim(value);
+			boost::to_lower(key);
+
+			kvp[key] = value; // Insert into map
+		} else {
+			// Log a warning if the token is malformed
+			LOG_WARNING << "Malformed token in message: " << token;
+		}
+	}
+}
+
+// Handler for physiological and render modifications
+void handleModificationMessage(Client *c, const std::string &message, const std::string &topic) {
+	std::map<std::string, std::string> kvp;
+	parseKeyValuePairs(message, kvp);
+
+	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
+	if (!tmgr) {
+		LOG_ERROR << "No manikin manager available for modification message.";
+		return;
+	}
+
+	std::string modType = kvp["type"];
+	std::string modLocation = kvp["location"];
+	std::string modPayload = kvp["payload"];
+	std::string modLearner = kvp["participant_id"];
+	AMM::UUID erID;
+	erID.id(kvp["event_id"].empty() ? tmgr->mgr->GenerateUuidString() : kvp["event_id"]);
+
+	if (topic == "AMM_Render_Modification") {
+		AMM::RenderModification renderMod;
+		renderMod.event_id(erID);
+		renderMod.type(modType);
+		renderMod.data(modPayload);
+		tmgr->mgr->WriteRenderModification(renderMod);
+	} else if (topic == "AMM_Physiology_Modification") {
+		AMM::PhysiologyModification physMod;
+		physMod.event_id(erID);
+		physMod.type(modType);
+		physMod.data(modPayload);
+		tmgr->mgr->WritePhysiologyModification(physMod);
+	} else {
+		LOG_WARNING << "Unknown modification topic: " << topic;
+	}
+}
+
+// Handler for "KEEPALIVE" messages - do nothing but log it for monitoring purposes
+void handleKeepAliveMessage(Client *c) {
+	LOG_TRACE << "Received KEEPALIVE from client " << c->id;
+}
+
+void processClientMessage(Client *c, const std::string &message) {
+	// Log and route the message based on its prefix/type
+	if (message.find(keepAlivePrefix) == 0) {
+		handleKeepAliveMessage(c);
+	} else if (message.find(registerPrefix) == 0) {
+		handleRegisterMessage(c, message);
+	} else if (message.find(kickPrefix) == 0) {
+		handleKickMessage(c, message);
+	} else if (message.find(statusPrefix) == 0) {
+		handleStatusMessage(c, message);
+	} else if (message.find(capabilityPrefix) == 0) {
+		handleCapabilityMessage(c, message);
+	} else if (message.find(settingsPrefix) == 0) {
+		handleSettingsMessage(c, message);
+	} else if (message.find(requestPrefix) == 0) {
+		handleRequestMessage(c, message);
+	} else if (message.find(actionPrefix) == 0) {
+		handleActionMessage(c, message);
+	} else if (message.find(genericTopicPrefix) == 0) {
+		// Parse the topic and message content for modification-type messages
+		unsigned firstBracket = message.find('[');
+		unsigned lastBracket = message.find(']');
+
+		if (firstBracket != std::string::npos && lastBracket != std::string::npos) {
+			std::string topic = message.substr(firstBracket + 1, lastBracket - firstBracket - 1);
+			std::string content = message.substr(lastBracket + 1);
+			handleModificationMessage(c, content, topic);
+		} else {
+			LOG_ERROR << "Malformed generic topic message from client " << c->id << ": " << message;
+		}
+	} else {
+		// Log an unknown or unsupported message type
+		LOG_ERROR << "Unknown or unsupported message from client " << c->id << ": " << message;
+	}
+}
+
 void *Server::HandleClient(void *args) {
-    auto *c = (Client *) args;
+	auto *c = static_cast<Client *>(args);
+	if (!c) return nullptr;
 
-    char buffer[8192 - 25];
-    int index;
-    ssize_t n;
+	char buffer[8192 - 25];
+	ssize_t n;
+	std::string uuid = gen_random(10);
 
+	// Mutex management and client setup
+	ServerThread::LockMutex(uuid);
+	c->SetId(uuid);
+	string defaultName = "Client " + c->id;
+	c->SetName(defaultName);
+	Server::clients.push_back(*c);
+	clientMap[c->id] = uuid;
+	LOG_DEBUG << "Adding client with id: " << c->id;
+	ServerThread::UnlockMutex(uuid);
 
-    std::string uuid = gen_random(10);
+	// Initialize game client data
+	auto gc = GetGameClient(c->id);
+	gc.client_id = c->id;
+	gc.client_connection = "TCP";
+	gc.connect_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+	UpdateGameClient(c->id, gc);
 
-    ServerThread::LockMutex(uuid);
-    c->SetId(uuid);
-    string defaultName = "Client " + c->id;
-    c->SetName(defaultName);
-    Server::clients.push_back(*c);
-    clientMap[c->id] = uuid;
-    LOG_DEBUG << "Adding client with id: " << c->id;
-    ServerThread::UnlockMutex(uuid);
+	while (true) {
+		memset(buffer, 0, sizeof(buffer));
+		n = recv(c->sock, buffer, sizeof(buffer), 0);
 
-    auto gc = GetGameClient(c->id);
-    const auto p1 = std::chrono::system_clock::now();
-    gc.client_id = c->id;
-    gc.client_connection = "TCP";
-    gc.connect_time = std::chrono::duration_cast<std::chrono::seconds>(
-            p1.time_since_epoch()).count();
-    UpdateGameClient(c->id, gc);
+		// Check if client disconnected
+		if (n == 0) {
+			LOG_INFO << c->name << " disconnected";
+			handleClientDisconnection(c, uuid);
+			break;
+		} else if (n < 0) {
+			LOG_ERROR << "Error while receiving message from client: " << c->name;
+			continue;
+		}
 
-    while (true) {
-        memset(buffer, 0, sizeof buffer);
-        n = recv(c->sock, buffer, sizeof buffer, 0);
+		// Process received message
+		std::string tempBuffer(buffer);
+		globalInboundBuffer[c->id] += tempBuffer;
 
-        // Client disconnected?
-        if (n == 0) {
-            LOG_INFO << c->name << " disconnected";
-            shutdown(c->sock, 2);
-            close(c->sock);
+		if (!boost::algorithm::ends_with(globalInboundBuffer[c->id], "\n")) {
+			continue;
+		}
 
-            // Remove client in Static clients <vector>
-            ServerThread::LockMutex(uuid);
-            index = Server::FindClientIndex(c);
-            LOG_DEBUG << "Erasing user in position " << index
-                      << " whose name id is: " << Server::clients[index].id;
-            Server::clients.erase(Server::clients.begin() + index);
-            ServerThread::UnlockMutex(uuid);
+		auto messages = Utility::explode("\n", globalInboundBuffer[c->id]);
+		globalInboundBuffer[c->id].clear();
 
-            auto gc = GetGameClient(c->id);
-            gc.client_status = "DISCONNECTED";
-            UpdateGameClient(c->id, gc);
-            std::ostringstream m;
-            m << "[SYS]UPDATE_CLIENT=";
-            m << "client_id=" << gc.client_id;
-            m << ";client_name=" << gc.client_name;
-            m << ";learner_name=" << gc.learner_name;
-            m << ";client_connection=" << gc.client_connection;
-            m << ";client_type=" << gc.client_type;
-            m << ";role=" << gc.role;
-            m << ";client_status=" << gc.client_status;
-            m << ";connect_time=" << gc.connect_time;
+		for (auto &message: messages) {
+			boost::trim(message);
+			if (message.empty()) continue;
 
-            auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
-            if (tmgr == NULL) {
-                LOG_WARNING << "Can't send disconnection update to manikin.";
-            } else {
-// send the disconnect message
-                AMM::Command cmdInstance;
-                cmdInstance.message(m.str());
-                tmgr->mgr->WriteCommand(cmdInstance);
-            }
+			if (message.find("KEEPALIVE") != std::string::npos) {
+				// Handle KEEPALIVE message
+				continue;
+			}
 
-            for (auto it = gameClientList.cbegin(), next_it = it; it != gameClientList.cend(); it = next_it) {
-                ++next_it;
-                std::string cl = it->first;
-                ConnectionData cd = it->second;
-                if (c->id == cl) {
-                    LOG_INFO << "Found client, we're removing: " << cd.client_name;
-                    gameClientList.erase(it);
-                }
-
-            }
-
-            // Remove from our client/UUID map
-            LOG_DEBUG << "Erasing from client map";
-            auto it = clientMap.find(c->id);
-            clientMap.erase(it);
-            LOG_DEBUG << "Done shutting down socket.";
-
-            break;
-        } else if (n < 0) {
-            LOG_ERROR << "Error while receiving message from client: " << c->name;
-        } else {
-            std::string tempBuffer(buffer);
-            globalInboundBuffer[c->id] += tempBuffer;
-            if (!boost::algorithm::ends_with(globalInboundBuffer[c->id], "\n")) {
-                continue;
-            }
-            vector <string> strings = Utility::explode("\n", globalInboundBuffer[c->id]);
-            globalInboundBuffer[c->id].clear();
-
-            for (auto str : strings) {
-                boost::trim(str);
-                if (!str.empty() && str != "") {
-                    if (str.find("KEEPALIVE") != std::string::npos) {
-                        break;
-                    }
-                    std::string requestManikin = ExtractManikinIDFromString(str);
-
-                    auto tmgr = pod.GetManikin(requestManikin);
-                    if (tmgr == NULL && !requestManikin.empty()) {
-                        LOG_ERROR << "Message: " << str << " (" << str.size() << ")";
-                        LOG_ERROR << " dispatched to manikin that has not been instantied: " << requestManikin;
-                        break;
-                    }
-
-                    if (str.substr(0, modulePrefix.size()) == modulePrefix) {
-                        std::string moduleName = str.substr(modulePrefix.size());
-
-                        // Add the modules name to the static Client vector
-                        ServerThread::LockMutex(uuid);
-                        c->SetName(moduleName);
-                        ServerThread::UnlockMutex(uuid);
-                        LOG_DEBUG << "Client " << c->id
-                                  << " module connected: " << moduleName;
-                    } else if (str.substr(0, registerPrefix.size()) == registerPrefix) {
-                        // Registering name
-                        std::string registerVal = str.substr(registerPrefix.size());
-                        LOG_INFO << "Client " << c->id
-                                 << " registered name: " << registerVal;
-                        vector <string> v = split(registerVal, ';');
-                        auto gc = GetGameClient(c->id);
-                        const auto p1 = std::chrono::system_clock::now();
-                        gc.client_name = c->id;
-                        gc.learner_name = v[0];
-                        gc.client_id = v[1];
-                        gc.client_connection = "TCP";
-                        gc.client_status = "CONNECTED";
-                        UpdateGameClient(c->id, gc);
-                        std::ostringstream cjm;
-                        cjm << "CLIENT_JOINED=" << c->id << std::endl;
-                        Server::SendToAll(cjm.str());
-
-                        std::ostringstream m;
-                        m << "[SYS]UPDATE_CLIENT=";
-                        m << "client_id=" << gc.client_id;
-                        m << ";client_name=" << gc.client_name;
-                        m << ";learner_name=" << gc.learner_name;
-                        m << ";client_connection=" << gc.client_connection;
-                        m << ";client_type=" << gc.client_type;
-                        m << ";role=" << gc.role;
-                        m << ";client_status=" << gc.client_status;
-                        m << ";connect_time=" << gc.connect_time;
-
-                        AMM::Command cmdInstance;
-                        cmdInstance.message(m.str());
-                        tmgr->mgr->WriteCommand(cmdInstance);
-                    } else if (str.substr(0, kickPrefix.size()) == kickPrefix) {
-                        // kick client
-                        std::string kickC = str.substr(kickPrefix.size());
-                        LOG_INFO << "Client " << c->id
-                                 << " requested kick of uuid: " << kickC;
-                        // erase it from the table if it exists
-                        for (auto it = gameClientList.cbegin(), next_it = it;
-                             it != gameClientList.cend(); it = next_it) {
-                            ++next_it;
-                            std::string cl = it->first;
-                            ConnectionData cd = it->second;
-                            if (kickC == cl) {
-                                LOG_INFO << "Found client, we're removing: " << cd.client_name;
-                                gameClientList.erase(it);
-                            }
-
-                        }
-
-                        AMM::Command cmdInstance;
-                        cmdInstance.message(str);
-                        tmgr->mgr->WriteCommand(cmdInstance);
-                    } else if (str.substr(0, statusPrefix.size()) == statusPrefix) {
-                        // Client set their status (OPERATIONAL, etc)
-                        std::string statusVal;
-                        try {
-                            statusVal = Utility::decode64(str.substr(statusPrefix.size()));
-                        } catch (exception &e) {
-                            LOG_ERROR << "Error decoding base64 string: " << e.what();
-                            break;
-                        }
-
-                        LOG_DEBUG << "Client " << c->id << " sent status"; //  << statusVal;
-                        tmgr->HandleStatus(c, statusVal);
-                    } else if (str.substr(0, capabilityPrefix.size()) ==
-                               capabilityPrefix) {
-                        // Client sent their capabilities / announced
-                        std::string capabilityVal;
-                        try {
-                            capabilityVal = Utility::decode64(str.substr(capabilityPrefix.size()));
-                        } catch (exception &e) {
-                            LOG_ERROR << "Error decoding base64 string: " << e.what();
-                            break;
-                        }
-                        LOG_INFO << "Client " << c->id << " sent capabilities."; // << capabilityVal;
-                        tmgr->HandleCapabilities(c, capabilityVal);
-
-                        std::ostringstream coreResp;
-                        coreResp << "CORE=" << CORE_ID << std::endl;
-                        Server::SendToClient(c, coreResp.str());
-                    } else if (str.substr(0, settingsPrefix.size()) == settingsPrefix) {
-                        std::string settingsVal;
-                        try {
-                            settingsVal = Utility::decode64(str.substr(settingsPrefix.size()));
-                        } catch (exception &e) {
-                            LOG_ERROR << "Error decoding base64 string: " << e.what();
-                            break;
-                        }
-                        LOG_INFO << "Client " << c->id << " sent settings: " << settingsVal;
-                        tmgr->HandleSettings(c, settingsVal);
-                    } else if (str.substr(0, keepHistoryPrefix.size()) ==
-                               keepHistoryPrefix) {
-                        // Setting the KEEP_HISTORY flag
-                        std::string keepHistory = str.substr(keepHistoryPrefix.size());
-                        if (keepHistory == "TRUE") {
-                            LOG_DEBUG << "Client " << c->id << " wants to keep history.";
-                            c->SetKeepHistory(true);
-                        } else {
-                            LOG_DEBUG << "Client " << c->id
-                                      << " does not want to keep history.";
-                            c->SetKeepHistory(false);
-                        }
-                    } else if (str.substr(0, requestPrefix.size()) == requestPrefix) {
-                        std::string request = str.substr(requestPrefix.size());
-                        tmgr->DispatchRequest(c, request);
-                    } else if (str.substr(0, actionPrefix.size()) == actionPrefix) {
-                        // Sending action
-                        std::string action = str.substr(actionPrefix.size());
-                        LOG_INFO << "Client " << c->id
-                                 << " posting action to AMM: " << action;
-                        AMM::Command cmdInstance;
-                        cmdInstance.message(action);
-                        // tmgr->PublishCommand(cmdInstance);
-                    } else if (!str.compare(0, genericTopicPrefix.size(), genericTopicPrefix)) {
-                        std::string manikin_id, topic, message, modType, modLocation, modPayload, modLearner, modInfo;
-                        unsigned first = str.find("[");
-                        unsigned last = str.find("]");
-                        topic = str.substr(first + 1, last - first - 1);
-                        message = str.substr(last + 1);
-
-                        if (topic == "KEEPALIVE") {
-                            continue;
-                        }
-
-                        LOG_INFO << "[Received a message for topic " << topic << " with a payload of: " << message;
-
-                        std::list <std::string> tokenList;
-                        split(tokenList, message, boost::algorithm::is_any_of(";"), boost::token_compress_on);
-                        std::map <std::string, std::string> kvp;
-
-                        BOOST_FOREACH(std::string
-                        token, tokenList) {
-                            size_t sep_pos = token.find_first_of("=");
-                            std::string key = token.substr(0, sep_pos);
-                            boost::algorithm::to_lower(key);
-                            std::string value = (sep_pos == std::string::npos ? "" : token.substr(
-                                    sep_pos + 1,
-                                    std::string::npos));
-                            kvp[key] = value;
-                            LOG_DEBUG << "\t" << key << " => " << kvp[key];
-                        }
-
-                        auto mid = kvp.find("mid");
-                        if (mid != kvp.end()) {
-                            manikin_id = mid->second;
-                        } else {
-                            manikin_id = DEFAULT_MANIKIN_ID;
-                        }
-                        LOG_TRACE << "Manikin id is " << manikin_id;
-
-                        auto type = kvp.find("type");
-                        if (type != kvp.end()) {
-                            modType = type->second;
-                        }
-
-                        auto location = kvp.find("location");
-                        if (location != kvp.end()) {
-                            modLocation = location->second;
-                        }
-
-                        auto participant_id = kvp.find("participant_id");
-                        if (participant_id != kvp.end()) {
-                            modLearner = participant_id->second;
-                        }
-
-                        if (modLearner.front() == '"') {
-                            modLearner.erase(0, 1); // erase the first character
-                            modLearner.erase(modLearner.size() - 1); // erase the last character
-                        }
-
-                        auto payload = kvp.find("payload");
-                        if (payload != kvp.end()) {
-                            modPayload = payload->second;
-                        }
-
-                        auto info = kvp.find("info");
-                        if (info != kvp.end()) {
-                            modInfo = info->second;
-                        }
-
-                        AMM::UUID erID;
-                        auto eid = kvp.find("event_id");
-                        if (eid != kvp.end()) {
-                            LOG_INFO << " Event record came in with an event ID so let's use it.";
-                            erID.id(eid->second);
-                        } else {
-                            erID.id(tmgr->mgr->GenerateUuidString());
-                        }
-
-                        if (topic == "AMM_Render_Modification") {
-
-                            FMA_Location fma;
-                            fma.name(modLocation);
-
-                            AMM::UUID agentID;
-                            agentID.id(modLearner);
-
-                            if (modType.empty()) {
-                                modType = ExtractTypeFromRenderMod(modPayload);
-                            };
-
-
-                            // [AMM_Render_Modification]payload=<RenderModification type="CHOSE_ROLE"/>;participant_id=[role ID as int]:[unique ID as string]:[player name as string]
-
-                            if (modType.find("CHOSE_ROLE") != std::string::npos) {
-
-                            }
-
-                            AMM::EventRecord er;
-                            er.id(erID);
-                            er.location(fma);
-                            er.agent_id(agentID);
-                            er.type(modType);
-                            tmgr->mgr->WriteEventRecord(er);
-
-                            AMM::RenderModification renderMod;
-                            renderMod.event_id(erID);
-                            renderMod.type(modType);
-                            renderMod.data(modPayload);
-                            tmgr->mgr->WriteRenderModification(renderMod);
-                            LOG_INFO << "We sent a render mod of type " << renderMod.type();
-                            LOG_INFO << "\tPayload was: " << renderMod.data();
-                        } else if (topic == "AMM_Physiology_Modification") {
-
-                            FMA_Location fma;
-                            fma.name(modLocation);
-
-                            AMM::UUID agentID;
-                            agentID.id(modLearner);
-
-                            if (modType.empty()) {
-                                modType = ExtractTypeFromRenderMod(modPayload);
-                            };
-
-                            AMM::EventRecord er;
-                            er.id(erID);
-                            er.location(fma);
-                            er.agent_id(agentID);
-                            er.type(modType);
-                            tmgr->mgr->WriteEventRecord(er);
-
-                            AMM::PhysiologyModification physMod;
-                            physMod.event_id(erID);
-                            physMod.type(modType);
-                            physMod.data(modPayload);
-                            tmgr->mgr->WritePhysiologyModification(physMod);
-
-                            LOG_INFO << "We sent a physMod of type " << physMod.type();
-                            LOG_INFO << "\tPayload was: " << physMod.data();
-
-                        } else if (topic == "AMM_Assessment") {
-                            FMA_Location fma;
-                            fma.name(modLocation);
-                            AMM::UUID agentID;
-                            agentID.id(modLearner);
-                            AMM::EventRecord er;
-                            er.id(erID);
-                            er.location(fma);
-                            er.agent_id(agentID);
-                            er.type(modType);
-                            tmgr->mgr->WriteEventRecord(er);
-
-                            AMM::Assessment assessment;
-                            assessment.event_id(erID);
-                            tmgr->mgr->WriteAssessment(assessment);
-                        } else if (topic == "AMM_Command") {
-                            AMM::Command cmdInstance;
-                            cmdInstance.message(message);
-                            tmgr->mgr->WriteCommand(cmdInstance);
-                        } else if (topic == "AMM_ModuleConfiguration") {
-                            AMM::ModuleConfiguration mc;
-                            mc.name(modType);
-                            mc.capabilities_configuration(modPayload);
-                            tmgr->mgr->WriteModuleConfiguration(mc);
-                        } else {
-                            LOG_DEBUG << "Unknown topic: " << topic;
-                        }
-                    }
-                } else if (str.substr(0, keepAlivePrefix.size()) == keepAlivePrefix) {
-                    // keepalive, ignore it
-                } else {
-                    if (!boost::algorithm::ends_with(str, "Connected") && str.size() > 3) {
-                        LOG_ERROR << "Client " << c->id << " unknown message:" << str;
-                    }
-                }
-            }
-        }
-    }
-
+			processClientMessage(c, message);
+		}
+	}
+	return nullptr;
 }
+
 
 void UdpDiscoveryThread(short port, bool enabled, std::string manikin_id) {
-    if (enabled) {
-        boost::asio::io_service io_service;
-        UdpDiscoveryServer udps(io_service, port, manikin_id);
-        LOG_INFO << "UDP Discovery listening on port " << port;
-        io_service.run();
-    } else {
-        LOG_INFO << "UDP discovery service not started due to command line option.";
-    }
+	if (enabled) {
+		boost::asio::io_service io_service;
+		UdpDiscoveryServer udps(io_service, port, manikin_id);
+		LOG_INFO << "UDP Discovery listening on port " << port;
+		io_service.run();
+	} else {
+		LOG_INFO << "UDP discovery service not started due to command line option.";
+	}
 }
 
 static void show_usage(const std::string &name) {
-    std::cerr << "Usage: " << name << " <option(s)>"
-              << "\nOptions:\n"
-              << "\t-p,--pod\t\tTPMS/pod mode\n"
-              << "\t-h,--help\t\tShow this help message\n"
-              << std::endl;
+	std::cerr << "Usage: " << name << " <option(s)>"
+	          << "\nOptions:\n"
+	          << "\t-p,--pod\t\tTPMS/pod mode\n"
+	          << "\t-h,--help\t\tShow this help message\n"
+	          << std::endl;
 }
 
 
 int main(int argc, const char *argv[]) {
-    static plog::ColorConsoleAppender <plog::TxtFormatter> consoleAppender;
-    plog::init(plog::verbose, &consoleAppender);
+	static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
+	plog::init(plog::verbose, &consoleAppender);
 
 
-    short discoveryPort = 8888;
-    int bridgePort = 9015;
-    bool podMode = true;
-    bool discovery = true;
-    int manikinCount = 1;
-    std::string coreId;
-    std::string manikinId = DEFAULT_MANIKIN_ID;
+	short discoveryPort = 8888;
+	int bridgePort = 9015;
+	bool podMode = true;
+	bool discovery = true;
+	int manikinCount = 1;
+	std::string coreId;
+	std::string manikinId = DEFAULT_MANIKIN_ID;
 
-    namespace po = boost::program_options;
+	namespace po = boost::program_options;
 
-    po::variables_map vm;
-    po::options_description desc("Allowed options");
-    desc.add_options()
-            ("help,h", "print usage message")
-            ("discovery", po::value(&discovery)->default_value(true), "UDP autodiscovery")
-            ("discovery_port,dp", po::value(&discoveryPort)->default_value(8888), "Autodiscovery port")
-            ("server_port,sp", po::value(&bridgePort)->default_value(9015), "Bridge port")
-            ("pod_mode", po::value(&podMode)->default_value(false), "POD mode")
-            ("manikin_id", po::value(&manikinId)->default_value("manikin_1"), "Manikin ID")
-            ("manikins", po::value(&manikinCount)->default_value(1))
-            ("core_id", po::value(&coreId)->default_value("AMM_000"), "Core ID");
-
-
-    // This isn't set to enforce it, but there are two modes of operation
-    //  POD mode, which will register 1-3 manikins and act as the instructor bridge
-    //  Manikin mod, which will register as a single manikin and act as the standard TCP bridge
+	po::variables_map vm;
+	po::options_description desc("Allowed options");
+	desc.add_options()
+			("help,h", "print usage message")
+			("discovery", po::value(&discovery)->default_value(true), "UDP autodiscovery")
+			("discovery_port,dp", po::value(&discoveryPort)->default_value(8888), "Autodiscovery port")
+			("server_port,sp", po::value(&bridgePort)->default_value(9015), "Bridge port")
+			("pod_mode", po::value(&podMode)->default_value(false), "POD mode")
+			("manikin_id", po::value(&manikinId)->default_value("manikin_1"), "Manikin ID")
+			("manikins", po::value(&manikinCount)->default_value(1))
+			("core_id", po::value(&coreId)->default_value("AMM_000"), "Core ID");
 
 
-    // TWo example run commands:
-    // ./amm_tcp_bridge -dp=8889 -sp=9016 -pod_mode=true manikins=4
-    //      Will launch in pod mode with 4 manikins
-    //
-    // ./amm_tcp_bridge -dp=8888 -sp=9015 -pod_mode=false manikin_id=manikin_2
-    //      Will launch in manikin mode with a single manikin using profile manikin_2
+	// This isn't set to enforce it, but there are two modes of operation
+	//  POD mode, which will register 1-3 manikins and act as the instructor bridge
+	//  Manikin mod, which will register as a single manikin and act as the standard TCP bridge
 
-    // parse arguments and save them in the variable map (vm)
-    po::store(po::parse_command_line(argc, argv, desc), vm);
-    po::notify(vm);
 
-    // Check if there are enough args or if --help is given
-    if (vm.count("help")) {
-        std::cerr << desc << "\n";
-        return 1;
-    }
+	// TWo example run commands:
+	// ./amm_tcp_bridge -dp=8889 -sp=9016 -pod_mode=true manikins=4
+	//      Will launch in pod mode with 4 manikins
+	//
+	// ./amm_tcp_bridge -dp=8888 -sp=9015 -pod_mode=false manikin_id=manikin_2
+	//      Will launch in manikin mode with a single manikin using profile manikin_2
 
-    DEFAULT_MANIKIN_ID = manikinId;
-    CORE_ID = coreId;
+	// parse arguments and save them in the variable map (vm)
+	po::store(po::parse_command_line(argc, argv, desc), vm);
+	po::notify(vm);
 
-    LOG_INFO << "=== [AMM - TCP Bridge] ===";
-    try {
-        pod.SetID(manikinId);
-        pod.SetMode(podMode);
-        if (podMode) {
-            pod.InitializeManikins(manikinCount);
-        } else {
-            pod.InitializeManikin(manikinId);
-        }
+	// Check if there are enough args or if --help is given
+	if (vm.count("help")) {
+		std::cerr << desc << "\n";
+		return 1;
+	}
 
-    } catch (exception &e) {
-        LOG_ERROR << "Unable to initialize manikins in POD: " << e.what();
-    }
+	DEFAULT_MANIKIN_ID = manikinId;
+	CORE_ID = coreId;
 
-    std::thread t1(UdpDiscoveryThread, discoveryPort, discovery, manikinId);
-    s = new Server(bridgePort);
-    std::string action;
+	LOG_INFO << "=== [AMM - TCP Bridge] ===";
+	try {
+		pod.SetID(manikinId);
+		pod.SetMode(podMode);
+		if (podMode) {
+			pod.InitializeManikins(manikinCount);
+		} else {
+			pod.InitializeManikin(manikinId);
+		}
 
-    LOG_INFO << "TCP Bridge listening on port " << bridgePort;
+	} catch (exception &e) {
+		LOG_ERROR << "Unable to initialize manikins in POD: " << e.what();
+	}
 
-    s->AcceptAndDispatch();
+	std::thread t1(UdpDiscoveryThread, discoveryPort, discovery, manikinId);
+	s = new Server(bridgePort);
+	std::string action;
 
-    t1.join();
+	LOG_INFO << "TCP Bridge listening on port " << bridgePort;
 
-    LOG_INFO << "TCP Bridge shutdown.";
+	s->AcceptAndDispatch();
+
+	t1.join();
+
+	LOG_INFO << "TCP Bridge shutdown.";
 }

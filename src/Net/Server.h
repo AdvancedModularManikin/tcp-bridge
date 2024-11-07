@@ -22,8 +22,7 @@ using namespace std;
 class Server {
 
 private:
-    static vector<Client> clients;
-    int serverSock;
+	int serverSock;
     struct sockaddr_in serverAddr, clientAddr;
 
 public:
@@ -39,12 +38,13 @@ public:
 
     static Client *GetClientByIndex(std::string id);
 
+	static int FindClientIndex(Client *c);
+
+	static vector<Client> clients;
 private:
     static void ListClients();
 
     static void SendToAll(char *message);
-
-    static int FindClientIndex(Client *c);
 
 protected:
     bool m_runThread;
