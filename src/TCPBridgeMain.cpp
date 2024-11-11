@@ -185,7 +185,9 @@ void handleCapabilityMessage(Client *c, const std::string &message) {
 		return;
 	}
 
-	LOG_INFO << "Client " << c->id << " sent capabilities: " << capabilities;
+	LOG_INFO << "Client " << c->id << " sent capabilities.";
+	// LOG_DEBUG << "Client " << c->id << " sent capabilities: " << capabilities;
+
 	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
 	if (tmgr) tmgr->HandleCapabilities(c, capabilities);
 
@@ -326,6 +328,8 @@ void processClientMessage(Client *c, const std::string &message) {
 		} else {
 			LOG_ERROR << "Malformed generic topic message from client " << c->id << ": " << message;
 		}
+	} else if (message.find("Module Connected") == 0) {
+		// Module connected message, ignore
 	} else {
 		// Log an unknown or unsupported message type
 		LOG_ERROR << "Unknown or unsupported message from client " << c->id << ": " << message;
@@ -419,7 +423,7 @@ static void show_usage(const std::string &name) {
 
 
 int main(int argc, const char *argv[]) {
-	static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
+	static plog::ColorConsoleAppender <plog::TxtFormatter> consoleAppender;
 	plog::init(plog::verbose, &consoleAppender);
 
 

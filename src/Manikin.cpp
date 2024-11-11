@@ -981,9 +981,8 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
     od.capabilities_schema(capabilityVal);
     od.description();
 
-    // mgr->WriteOperationalDescription(od);
+    mgr->WriteOperationalDescription(od);
 
-    LOG_INFO << "Making client entry";
     // Set the client's type
     ServerThread::LockMutex(c->id);
     c->SetClientType(nodeName);
@@ -994,7 +993,6 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
     }
     ServerThread::UnlockMutex(c->id);
 
-    LOG_INFO << "Clearing topic trackers";
     subscribedTopics[c->id].clear();
     publishedTopics[c->id].clear();
 
