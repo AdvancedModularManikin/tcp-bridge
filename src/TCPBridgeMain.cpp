@@ -24,13 +24,13 @@ using namespace eprosima::fastrtps::rtps;
 
 Server *s;
 
-std::map<std::string, std::string> clientMap;
-std::map<std::string, std::string> clientTypeMap;
+std::map <std::string, std::string> clientMap;
+std::map <std::string, std::string> clientTypeMap;
 
-std::map<std::string, std::vector<std::string>> subscribedTopics;
-std::map<std::string, std::vector<std::string>> publishedTopics;
-std::map<std::string, ConnectionData> gameClientList;
-std::map<std::string, std::string> globalInboundBuffer;
+std::map <std::string, std::vector<std::string>> subscribedTopics;
+std::map <std::string, std::vector<std::string>> publishedTopics;
+std::map <std::string, ConnectionData> gameClientList;
+std::map <std::string, std::string> globalInboundBuffer;
 
 std::string DEFAULT_MANIKIN_ID = "manikin_1";
 std::string CORE_ID;
@@ -233,9 +233,9 @@ void handleActionMessage(Client *c, const std::string &message) {
 	if (tmgr) tmgr->mgr->WriteCommand(cmdInstance);
 }
 
-void parseKeyValuePairs(const std::string &message, std::map<std::string, std::string> &kvp) {
+void parseKeyValuePairs(const std::string &message, std::map <std::string, std::string> &kvp) {
 	// Split the message into tokens based on semicolons
-	std::vector<std::string> tokens;
+	std::vector <std::string> tokens;
 	boost::split(tokens, message, boost::is_any_of(";"), boost::token_compress_on);
 
 	// Process each token to extract key-value pairs
@@ -258,36 +258,43 @@ void parseKeyValuePairs(const std::string &message, std::map<std::string, std::s
 	}
 }
 
+
+
 // Handler for physiological and render modifications
 void handleModificationMessage(Client *c, const std::string &message, const std::string &topic) {
 	std::map<std::string, std::string> kvp;
 	parseKeyValuePairs(message, kvp);
-
 	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
 	if (!tmgr) {
 		LOG_ERROR << "No manikin manager available for modification message.";
 		return;
 	}
 
-	std::string modType = kvp["type"];
-	std::string modLocation = kvp["location"];
-	std::string modPayload = kvp["payload"];
-	std::string modLearner = kvp["participant_id"];
 	AMM::UUID erID;
 	erID.id(kvp["event_id"].empty() ? tmgr->mgr->GenerateUuidString() : kvp["event_id"]);
 
+	AMM::FMA_Location fma;
+	fma.name(kvp["location"]);
+
+	AMM::UUID agentID;
+	agentID.id(kvp["participant_id"]);
+
+	std::string modType = kvp["type"];
+	std::string modPayload = kvp["payload"];
+
 	if (topic == "AMM_Render_Modification") {
-		AMM::RenderModification renderMod;
-		renderMod.event_id(erID);
-		renderMod.type(modType);
-		renderMod.data(modPayload);
-		tmgr->mgr->WriteRenderModification(renderMod);
+		tmgr->SendEventRecord(erID, fma, agentID, modType);
+		tmgr->SendRenderModification(erID, modType, modPayload);
 	} else if (topic == "AMM_Physiology_Modification") {
-		AMM::PhysiologyModification physMod;
-		physMod.event_id(erID);
-		physMod.type(modType);
-		physMod.data(modPayload);
-		tmgr->mgr->WritePhysiologyModification(physMod);
+		tmgr->SendEventRecord(erID, fma, agentID, modType);
+		tmgr->SendPhysiologyModification(erID, modType, modPayload);
+	} else if (topic == "AMM_Assessment") {
+		tmgr->SendEventRecord(erID, fma, agentID, modType);
+		tmgr->SendAssessment(erID);
+	} else if (topic == "AMM_Command") {
+		tmgr->SendCommand(message);
+	} else if (topic == "AMM_ModuleConfiguration") {
+		tmgr->SendModuleConfiguration(modType, modPayload);
 	} else {
 		LOG_WARNING << "Unknown modification topic: " << topic;
 	}

@@ -613,6 +613,53 @@ void Manikin::onNewOperationalDescription(AMM::OperationalDescription &opD, Samp
 	}
 }
 
+void Manikin::SendEventRecord(const AMM::UUID &erID, const AMM::FMA_Location &location, const AMM::UUID &agentID, const std::string &type) {
+	AMM::EventRecord er;
+	er.id(erID);
+	er.location(location);
+	er.agent_id(agentID);
+	er.type(type);
+	mgr->WriteEventRecord(er);
+}
+
+void Manikin::SendRenderModification(const AMM::UUID &erID,
+                             const std::string &type, const std::string &payload) {
+	AMM::RenderModification renderMod;
+	renderMod.event_id(erID);
+	renderMod.type(type);
+	renderMod.data(payload);
+	mgr->WriteRenderModification(renderMod);
+}
+
+void Manikin::SendPhysiologyModification(const AMM::UUID &erID,
+                                 const std::string &type, const std::string &payload) {
+	AMM::PhysiologyModification physMod;
+	physMod.event_id(erID);
+	physMod.type(type);
+	physMod.data(payload);
+	mgr->WritePhysiologyModification(physMod);
+}
+
+void Manikin::SendAssessment(const AMM::UUID &erID) {
+	AMM::Assessment assessment;
+	assessment.event_id(erID);
+	mgr->WriteAssessment(assessment);
+}
+
+void Manikin::SendCommand(const std::string &message) {
+	AMM::Command cmdInstance;
+	cmdInstance.message(message);
+	mgr->WriteCommand(cmdInstance);
+}
+
+void Manikin::SendModuleConfiguration(const std::string &name,
+                              const std::string &config) {
+	AMM::ModuleConfiguration mc;
+	mc.name(name);
+	mc.capabilities_configuration(config);
+	mgr->WriteModuleConfiguration(mc);
+}
+
 void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *info) {
 	LOG_INFO << "[TPMS] Command Message came in on manikin " << manikin_id << ": " << c.message();
 	if (!c.message().compare(0, sysPrefix.size(), sysPrefix)) {

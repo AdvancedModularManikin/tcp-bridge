@@ -95,6 +95,22 @@ public:
 
     void InitializeLabNodes();
 
+	void SendEventRecord(const AMM::UUID &erID,
+	                               const AMM::FMA_Location &location, const AMM::UUID &agentID, const std::string &type);
+
+	void SendRenderModification(const AMM::UUID &erID,
+	                                      const std::string &type, const std::string &payload);
+
+	void SendPhysiologyModification(const AMM::UUID &erID,
+	                                          const std::string &type, const std::string &payload);
+
+	void SendAssessment(const AMM::UUID &erID);
+
+	void SendCommand(const std::string &message);
+
+	void SendModuleConfiguration(const std::string &name,
+	                                       const std::string &config);
+
 private:
 
 
