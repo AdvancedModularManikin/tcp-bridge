@@ -8,7 +8,7 @@ void UdpDiscoveryServer::handle_receive_from(
         cout << "\tAutodiscovery request from " << sender_endpoint_ << ": " << data_ << endl;
         // @TODO: Verify this is a valid request before sending data back
         socket_.async_send_to(
-                boost::asio::buffer(data_, bytes_recvd), sender_endpoint_,
+                boost::asio::buffer(return_data, sizeof(return_data)), sender_endpoint_,
                 boost::bind(&UdpDiscoveryServer::handle_send_to, this,
                             boost::asio::placeholders::error,
                             boost::asio::placeholders::bytes_transferred));

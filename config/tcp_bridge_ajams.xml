@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+   <profiles>
+      <participant profile_name="manikin_1">
+         <domainId>1</domainId>
+         <rtps>
+            <name>AMM_TCP_Bridge</name>
+         </rtps>
+      </participant>
+      <participant profile_name="manikin_2">
+         <domainId>2</domainId>
+         <rtps>
+            <name>AMM_TCP_Bridge</name>
+         </rtps>
+      </participant>
+      <participant profile_name="manikin_3">
+         <domainId>3</domainId>
+         <rtps>
+            <name>AMM_TCP_Bridge</name>
+         </rtps>
+      </participant>
+      <participant profile_name="manikin_4">
+         <domainId>4</domainId>
+         <rtps>
+            <name>AMM_TCP_Bridge</name>
+         </rtps>
+      </participant>
+   </profiles>
+</dds>
