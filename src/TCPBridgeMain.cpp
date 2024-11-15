@@ -280,8 +280,13 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	agentID.id(kvp["participant_id"]);
 
 	std::string modType = kvp["type"];
+
 	std::string modPayload = kvp["payload"];
 
+	if (modType.empty()) {
+	  modType = ExtractTypeFromRenderMod(modPayload);
+	};
+	
 	if (topic == "AMM_Render_Modification") {
 		tmgr->SendEventRecord(erID, fma, agentID, modType);
 		tmgr->SendRenderModification(erID, modType, modPayload);
