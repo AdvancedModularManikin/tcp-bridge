@@ -31,7 +31,7 @@ Server::Server(int port) {
     listen(serverSock, 30);
 }
 
-void Server::AcceptAndDispatch() {
+/*void Server::AcceptAndDispatch() {
 
     Client *c;
     ServerThread *t;
@@ -51,6 +51,53 @@ void Server::AcceptAndDispatch() {
             t->Create((void *) Server::HandleClient, c);
         }
     }
+}*/
+
+void Server::AcceptAndDispatch() {
+	socklen_t cliSize = sizeof(sockaddr_in);
+
+	while (m_runThread) {
+		auto* c = new Client();
+		auto* t = new ServerThread();
+
+		// Attempt to accept a new connection
+		c->sock = accept(serverSock, (struct sockaddr*)&clientAddr, &cliSize);
+		if (c->sock < 0) {
+			cerr << "Error on accept: " << strerror(errno) << endl;
+
+			// Clean up resources in case of accept failure
+			delete c;
+			delete t;
+
+			if (errno == EINTR) {
+				continue;  // Interrupted by signal, retry accept
+			} else {
+				break;  // Fatal error, exit the loop
+			}
+		} else {
+			try {
+				// Create a new thread for handling the client
+				t->Create((void*)Server::HandleClient, c);
+			} catch (const std::exception& e) {
+				cerr << "Failed to create thread: " << e.what() << endl;
+
+				// Clean up resources if thread creation fails
+				close(c->sock);
+				delete c;
+				delete t;
+			} catch (...) {
+				cerr << "Unknown error occurred during thread creation." << endl;
+
+				// Clean up resources for unknown exceptions
+				close(c->sock);
+				delete c;
+				delete t;
+			}
+		}
+	}
+
+	// Ensure server socket is closed when stopping
+	close(serverSock);
 }
 
 void Server::SendToAll(const std::string &message) {
@@ -119,3 +166,4 @@ Client *Server::GetClientByIndex(std::string id) {
     }
     return nullptr;
 }
+
