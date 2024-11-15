@@ -1,10 +1,14 @@
-# AMM - TCP Bridge
+# MoHSES - TCP Bridge
+The TCP Bridge is a simple TCP socket server which allows for implementing MoHSES modules without the need for the entire DDS middleware stack. It is not a complete implementation of MoHSES but supports the most common functionality used in module development. The TCP Bridge serves as an excellent testbed for prototyping and rapid development.
+
+- Stateful
+- Persistent
+- Uses simple TCP sockets.
+- Supports wired and wireless module connections.
 
 #### Requirements
-The TCP Bridge requires the [AMM Standard Library](https://github.com/AdvancedModularManikin/amm-library) be built and available (and so requires FastRTPS and FastCDR).  In addition to the AMM library dependancies, the TCP Bridge also requires:
+- [MoHSES Standard Library](https://github.com/AdvancedModularManikin/amm-library) (and FastRTPS and FastCDR)
 - tinyxml2 (`apt-get install libtinyxml2-dev`)
-
- 
 
 ### Installation
 ```bash
