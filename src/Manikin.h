@@ -27,8 +27,9 @@ protected:
     std::string manikin_id;
 
 
-    std::mutex m_mapmutex;
-
+  std::mutex m_mapmutex;
+  std::mutex m_topicmutex;
+  
     std::map <std::string, std::map<std::string, double>> labNodes;
 
     std::vector <std::string> primaryServices = {
@@ -66,7 +67,8 @@ public:
 
     bool podMode = false;
 
-    AMM::DDSManager <Manikin> *mgr;
+  //  AMM::DDSManager <Manikin> *mgr;
+  std::unique_ptr<AMM::DDSManager<Manikin>> mgr;
 
     std::string ExtractServiceFromCommand(std::string in);
     std::string ExtractType(std::string in);

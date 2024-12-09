@@ -18,7 +18,8 @@ Manikin::Manikin(std::string mid, bool pm, std::string pid) {
 	if (podMode) {
 		LOG_INFO << "\tCurrently in POD/TPMS mode.";
 	}
-	mgr = new DDSManager<Manikin>(config_file, manikin_id);
+	//	mgr = new DDSManager<Manikin>(config_file, manikin_id);
+	mgr = std::make_unique<DDSManager<Manikin>>(config_file, manikin_id);
 
 	mgr->InitializeCommand();
 	mgr->InitializeInstrumentData();
@@ -459,7 +460,7 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 	std::ostringstream messageOut;
 	std::string rendModPayload;
 	std::string rendModType;
-	if (!rendMod.data()) {
+	if (rendMod.data() == "") {
 		rendModPayload = "<RenderModification type='" + rendMod.type() + "'/>";
 		rendModType = "";
 	} else {
@@ -467,6 +468,7 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 		// rendModType = rendMod.type();
 		rendModType = "";
 	}
+	
 	messageOut << "[AMM_Render_Modification]"
 	           << "id=" << rendMod.id().id() << ";"
 	           << "mid=" << manikin_id << ";"
@@ -481,6 +483,8 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 	if (rendModPayload.find("START_OF") == std::string::npos) {
 		LOG_INFO << "[TPMS] Render mod Message came in on manikin " << manikin_id << ", republishing to TCP: "
 		         << stringOut;
+	} else {
+	  //	  LOG_DEBUG << "Inhale/exhale: " << rendModType << " - " << rendModPayload;
 	}
 
 	if (rendModPayload.find("CHOSE_ROLE") != std::string::npos) {
@@ -625,9 +629,19 @@ void Manikin::SendEventRecord(const AMM::UUID &erID, const AMM::FMA_Location &lo
 void Manikin::SendRenderModification(const AMM::UUID &erID,
                              const std::string &type, const std::string &payload) {
 	AMM::RenderModification renderMod;
+
+
+	if (!type.empty() && payload.empty()) {
+	  std::ostringstream tpayload;
+	  tpayload << "<RenderModification type='" << type << "'/>";
+	  renderMod.data(tpayload.str());	  
+	} else {
+	  renderMod.data(payload);
+	}
+	
 	renderMod.event_id(erID);
 	renderMod.type(type);
-	renderMod.data(payload);
+
 	mgr->WriteRenderModification(renderMod);
 }
 
@@ -1017,9 +1031,10 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 	ServerThread::LockMutex(c->id);
 	c->SetClientType(nodeName);
 	try {
-		clientTypeMap.insert({c->id, nodeName});
+	  std::lock_guard<std::mutex> lock(m_mapmutex);
+	  clientTypeMap.insert({c->id, nodeName});
 	} catch (exception &e) {
-		LOG_ERROR << "Unable to insert into clientTypeMap: " << e.what();
+	  LOG_ERROR << "Unable to insert into clientTypeMap: " << e.what();
 	}
 	ServerThread::UnlockMutex(c->id);
 
@@ -1068,6 +1083,7 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 							subTopicName = subNodePath;
 						}
 					}
+					std::lock_guard<std::mutex> lock(m_topicmutex);
 					Utility::add_once(subscribedTopics[c->id], subTopicName);
 					LOG_TRACE << "[" << capabilityName << "][" << c->id
 					          << "] Subscribing to " << subTopicName;
@@ -1083,6 +1099,7 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 				     pub; pub = pub->NextSibling()) {
 					tinyxml2::XMLElement *p = pub->ToElement();
 					std::string pubTopicName = p->Attribute("name");
+					std::lock_guard<std::mutex> lock(m_topicmutex);
 					Utility::add_once(publishedTopics[c->id], pubTopicName);
 					LOG_TRACE << "[" << capabilityName << "][" << c->id
 					          << "] Publishing " << pubTopicName;

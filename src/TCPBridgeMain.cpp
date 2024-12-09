@@ -283,13 +283,19 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 
 	std::string modPayload = kvp["payload"];
 
-	if (modType.empty()) {
+	if (modType == "") {
 	  modType = ExtractTypeFromRenderMod(modPayload);
-	};
+	}
 	
 	if (topic == "AMM_Render_Modification") {
-		tmgr->SendEventRecord(erID, fma, agentID, modType);
-		tmgr->SendRenderModification(erID, modType, modPayload);
+	  tmgr->SendEventRecord(erID, fma, agentID, modType);
+	  if (modPayload == "") { // make a render mod payload
+	      std::ostringstream tPayload;
+	      tPayload << "<RenderModification type='" << modType << "'/>";	      
+	      tmgr->SendRenderModification(erID, modType, tPayload.str());
+	    } else {	      	      
+	      tmgr->SendRenderModification(erID, modType, modPayload);
+	    }
 	} else if (topic == "AMM_Physiology_Modification") {
 		tmgr->SendEventRecord(erID, fma, agentID, modType);
 		tmgr->SendPhysiologyModification(erID, modType, modPayload);
@@ -330,8 +336,8 @@ void processClientMessage(Client *c, const std::string &message) {
 		handleActionMessage(c, message);
 	} else if (message.find(genericTopicPrefix) == 0) {
 		// Parse the topic and message content for modification-type messages
-		unsigned firstBracket = message.find('[');
-		unsigned lastBracket = message.find(']');
+		int firstBracket = message.find('[');
+		int lastBracket = message.find(']');
 
 		if (firstBracket != std::string::npos && lastBracket != std::string::npos) {
 			std::string topic = message.substr(firstBracket + 1, lastBracket - firstBracket - 1);
