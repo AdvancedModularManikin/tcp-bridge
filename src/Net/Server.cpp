@@ -1,169 +1,147 @@
 #include "Server.h"
 
-using namespace std;
-
+// Static members
 vector<Client> Server::clients;
 
+// Constructor
 Server::Server(int port) {
+	int yes = 1;
+	m_runThread = true;
 
-    // Initialize static mutex from ServerThread
-    ServerThread::InitMutex();
+	// Initialize the server socket
+	serverSock = socket(AF_INET, SOCK_STREAM, 0);
+	if (serverSock < 0) {
+		throw runtime_error("Failed to create socket");
+	}
 
-    // For setsock opt (REUSEADDR)
-    int yes = 1;
-    m_runThread = true;
+	// Configure the server address
+	memset(&serverAddr, 0, sizeof(sockaddr_in));
+	serverAddr.sin_family = AF_INET;
+	serverAddr.sin_addr.s_addr = INADDR_ANY;
+	serverAddr.sin_port = htons(port);
 
-    // Init serverSock and start listen()'ing
-    serverSock = socket(AF_INET, SOCK_STREAM, 0);
-    memset(&serverAddr, 0, sizeof(sockaddr_in));
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_addr.s_addr = INADDR_ANY;
-    serverAddr.sin_port = htons(port);
+	// Set socket options
+	setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
+	setsockopt(serverSock, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int));
 
-    setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
-    setsockopt(serverSock, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int));
+	// Bind the socket
+	if (bind(serverSock, (struct sockaddr*)&serverAddr, sizeof(sockaddr_in)) < 0) {
+		throw runtime_error("Failed to bind socket");
+	}
 
+	// Start listening
+	if (listen(serverSock, 30) < 0) {
+		throw runtime_error("Failed to listen on socket");
+	}
 
-
-    if (bind(serverSock, (struct sockaddr *) &serverAddr, sizeof(sockaddr_in)) < 0)
-        cerr << "Failed to bind";
-
-    listen(serverSock, 30);
+	LOG_INFO << "Server initialized on port " << port;
 }
 
-/*void Server::AcceptAndDispatch() {
-
-    Client *c;
-    ServerThread *t;
-
-    socklen_t cliSize = sizeof(sockaddr_in);
-
-    while (m_runThread) {
-
-        c = new Client();
-        t = new ServerThread();
-
-        // Blocks here;
-        c->sock = accept(serverSock, (struct sockaddr *) &clientAddr, &cliSize);
-        if (c->sock < 0) {
-            cerr << "Error on accept";
-        } else {
-            t->Create((void *) Server::HandleClient, c);
-        }
-    }
-}*/
-
+// Accept new connections and dispatch them to threads
 void Server::AcceptAndDispatch() {
 	socklen_t cliSize = sizeof(sockaddr_in);
 
 	while (m_runThread) {
-		auto* c = new Client();
-		auto* t = new ServerThread();
+		auto* client = new Client();
+		client->sock = accept(serverSock, (struct sockaddr*)&clientAddr, &cliSize);
 
-		// Attempt to accept a new connection
-		c->sock = accept(serverSock, (struct sockaddr*)&clientAddr, &cliSize);
-		if (c->sock < 0) {
-			cerr << "Error on accept: " << strerror(errno) << endl;
-
-			// Clean up resources in case of accept failure
-			delete c;
-			delete t;
+		if (client->sock < 0) {
+			LOG_ERROR << "Error on accept: " << strerror(errno);
+			delete client;
 
 			if (errno == EINTR) {
-				continue;  // Interrupted by signal, retry accept
+				continue; // Retry on interrupt
 			} else {
-				break;  // Fatal error, exit the loop
+				break; // Exit on fatal error
 			}
-		} else {
-			try {
-				// Create a new thread for handling the client
-				t->Create((void*)Server::HandleClient, c);
-			} catch (const std::exception& e) {
-				cerr << "Failed to create thread: " << e.what() << endl;
+		}
 
-				// Clean up resources if thread creation fails
-				close(c->sock);
-				delete c;
-				delete t;
-			} catch (...) {
-				cerr << "Unknown error occurred during thread creation." << endl;
-
-				// Clean up resources for unknown exceptions
-				close(c->sock);
-				delete c;
-				delete t;
-			}
+		// Handle new client connection
+		try {
+			auto* clientThread = new ServerThread();
+			clientThread->Create((void*)Server::HandleClient, client);
+		} catch (...) {
+			LOG_ERROR << "Failed to create thread for client";
+			close(client->sock);
+			delete client;
 		}
 	}
 
-	// Ensure server socket is closed when stopping
 	close(serverSock);
+	LOG_INFO << "Server stopped accepting connections.";
 }
 
-void Server::SendToAll(const std::string &message) {
-    ssize_t n;
+// Send a message to all clients
+void Server::SendToAll(const std::string& message) {
+	std::lock_guard<std::mutex> lock(clientsMutex);
 
-    ServerThread::LockMutex("'SendToAll()'");
-
-    for (auto &client : clients) {
-        n = send(client.sock, message.c_str(), strlen(message.c_str()), 0);
-        // cout << n << " bytes sent." << endl;
-    }
-
-    // Release the lock
-    ServerThread::UnlockMutex("'SendToAll()'");
+	for (auto& client : clients) {
+		if (send(client.sock, message.c_str(), message.length(), 0) < 0) {
+			LOG_ERROR << "Error sending to client " << client.id << ": " << strerror(errno);
+		}
+	}
 }
 
-void Server::SendToAll(char *message) {
-    ssize_t n;
-
-    // Acquire the lock
-    ServerThread::LockMutex("'SendToAll()'");
-
-    for (auto &client : clients) {
-        n = send(client.sock, message, strlen(message), 0);
-        // cout << n << " bytes sent." << endl;
-    }
-
-    // Release the lock
-    ServerThread::UnlockMutex("'SendToAll()'");
+// Overloaded version to send a C-string
+void Server::SendToAll(char* message) {
+	SendToAll(std::string(message));
 }
 
-void Server::SendToClient(Client *c, const std::string &message) {
-    ssize_t n;
-    ServerThread::LockMutex("'SendToClient()'");
+// Send a message to a specific client
+void Server::SendToClient(Client* client, const std::string& message) {
+	std::lock_guard<std::mutex> lock(clientsMutex);
 
-    // cout << " Sending message to [" << c->name << "](" << c->id << "): " <<
-    // message << endl;
-    n = send(c->sock, message.c_str(), strlen(message.c_str()), 0);
-    // cout << n << " bytes sent." << endl;
-    ServerThread::UnlockMutex("'SendToClient()'");
+	if (send(client->sock, message.c_str(), message.length(), 0) < 0) {
+		LOG_ERROR << "Error sending to client " << client->id << ": " << strerror(errno);
+	}
 }
 
+// List all connected clients
 void Server::ListClients() {
-    for (auto &client : clients) {
-        cout << "|" << client.name << "|" << client.clientType << endl;
+	std::lock_guard<std::mutex> lock(clientsMutex);
 
-    }
+	for (const auto& client : clients) {
+		LOG_TRACE << "|" << client.name << "|" << client.clientType << endl;
+	}
 }
 
-/*
-  Should be called when vector<Client> clients is locked!
-*/
-int Server::FindClientIndex(Client *c) {
-    for (size_t i = 0; i < clients.size(); i++) {
-        if ((Server::clients[i].id) == c->id)
-            return (int) i;
-    }
-    cerr << "Client id not found." << endl;
-    return -1;
+// Remove a client from the list and clean up resources
+void Server::RemoveClient(Client* client) {
+	std::lock_guard<std::mutex> lock(clientsMutex);
+
+	shutdown(client->sock, SHUT_RDWR);
+	close(client->sock);
+
+	int index = FindClientIndex(client);
+	if (index != -1) {
+		clients.erase(clients.begin() + index);
+		LOG_INFO << "Client removed: " << client->id;
+	} else {
+		LOG_ERROR << "Client not found for removal: " << client->id;
+	}
 }
 
-Client *Server::GetClientByIndex(std::string id) {
-    for (size_t i = 0; i < clients.size(); i++) {
-        if ((Server::clients[i].id) == id)
-            return &Server::clients[i];
-    }
-    return nullptr;
+// Find the index of a client in the list
+int Server::FindClientIndex(Client* client) {
+	std::lock_guard<std::mutex> lock(clientsMutex);
+
+	for (size_t i = 0; i < clients.size(); ++i) {
+		if (clients[i].id == client->id) {
+			return static_cast<int>(i);
+		}
+	}
+	LOG_ERROR << "Client ID not found: " << client->id;
+	return -1;
 }
 
+// Get a client by ID
+Client* Server::GetClientByIndex(const std::string& id) {
+	std::lock_guard<std::mutex> lock(clientsMutex);
+
+	for (auto& client : clients) {
+		if (client.id == id) {
+			return &client;
+		}
+	}
+	return nullptr;
+}

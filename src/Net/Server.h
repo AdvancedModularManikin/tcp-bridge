@@ -1,52 +1,45 @@
 #pragma once
 
 #include <iostream>
-#include <sstream>
 #include <string>
 #include <vector>
-#include <map>
-
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <mutex>
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 
+#include "amm/BaseLogger.h"
+
 #include "Client.h"
 #include "ServerThread.h"
 
-using namespace std;
-
 class Server {
-
-private:
-	int serverSock;
-    struct sockaddr_in serverAddr, clientAddr;
-
 public:
-    explicit Server(int port);
+	explicit Server(int port);
 
-    void AcceptAndDispatch();
+	// Core server operations
+	void AcceptAndDispatch();
+	static void* HandleClient(void* args);
 
-    static void *HandleClient(void *args);
+	// Client operations
+	static void SendToAll(const std::string& message);
+	static void SendToClient(Client* client, const std::string& message);
+	static Client* GetClientByIndex(const std::string& id);
+	static int FindClientIndex(Client* client);
+	static void RemoveClient(Client* client);
 
-    static void SendToAll(const std::string &message);
-
-    static void SendToClient(Client *c, const std::string &message);
-
-    static Client *GetClientByIndex(std::string id);
-
-	static int FindClientIndex(Client *c);
-
-	static vector<Client> clients;
 private:
-    static void ListClients();
+	// Utility and internal operations
+	static void ListClients();
+	static void SendToAll(char* message);
 
-    static void SendToAll(char *message);
+	// Member variables
+	int serverSock;
+	struct sockaddr_in serverAddr, clientAddr;
+	bool m_runThread;
 
-protected:
-    bool m_runThread;
+	// Static shared resources
+	static std::vector<Client> clients;
+	static std::mutex clientsMutex;
 };
-

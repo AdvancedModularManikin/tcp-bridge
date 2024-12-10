@@ -1,31 +1,30 @@
 #pragma once
 
 #include "Manikin.h"
-
-#include "bridge.h"
+#include <map>
+#include <string>
 
 class TPMS {
-
 public:
-    TPMS();
+	TPMS();
+	~TPMS();
 
-    ~TPMS();
+	// Setters
+	void SetID(const std::string& id);
+	void SetMode(bool podMode);
 
-    void SetID(std::string id);
-    void SetMode(bool podMode);
-    void InitializeManikins(int count);
-    void InitializeManikin(std::string manikinId);
+	// Manikin initialization
+	void InitializeManikins(int count);
+	void InitializeManikin(const std::string& manikinId);
 
-    Manikin* GetManikin(std::string mid);
+	// Accessor
+	Manikin* GetManikin(const std::string& manikinId);
 
-    std::string myID;
+private:
+	// Member variables
+	std::string myID;                 // ID of the TPMS
+	bool mode{};                        // Mode (podMode)
 
-    Manikin* mgr1;
-    Manikin* mgr2;
-    Manikin* mgr3;
-    Manikin* mgr4;
-
-    bool mode;
-
+	// Manikin management
+	std::map<std::string, Manikin*> manikins; // Map to store manikins dynamically by ID
 };
-

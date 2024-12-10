@@ -17,7 +17,6 @@ public:
     pthread_t tid;
 
 private:
-    static pthread_mutex_t mutex;
 
 public:
     ServerThread();
@@ -26,9 +25,4 @@ public:
 
     int Join();
 
-    static int InitMutex();
-
-    static int LockMutex(const string &identifier);
-
-    static int UnlockMutex(const string &identifier);
 };

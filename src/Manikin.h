@@ -6,12 +6,11 @@
 
 #include "amm/TopicNames.h"
 
-#include <map>
-
-
 #include "Net/Server.h"
 #include "Net/Client.h"
 
+#include <map>
+#include <utility>
 #include <tinyxml2.h>
 #include <boost/process.hpp>
 
@@ -59,24 +58,23 @@ protected:
     };
 
 public:
-    Manikin(std::string mid, bool mode, std::string parentId);
+    Manikin(const std::string& mid, bool mode, std::string parentId);
 
-    void SetServer(Server* srv);
-
-    ~Manikin();
+	~Manikin();
 
     bool podMode = false;
 
   //  AMM::DDSManager <Manikin> *mgr;
   std::unique_ptr<AMM::DDSManager<Manikin>> mgr;
 
-    std::string ExtractServiceFromCommand(std::string in);
-    std::string ExtractType(std::string in);
+    static std::string ExtractServiceFromCommand(const std::string& in);
+
+	std::string ExtractType(const std::string& in);
     void MakePrimary();
     void MakeSecondary();
-    bool isAuthorized();
-    void sendConfig(Client *c, std::string scene, std::string clientType);
-    void sendConfigToAll(std::string scene);
+    static bool isAuthorized();
+    void sendConfig(Client *c, const std::string& scene, const std::string& clientType);
+    void sendConfigToAll(const std::string& scene);
 
     void ParseCapabilities(tinyxml2::XMLElement *node);
 
@@ -88,8 +86,7 @@ public:
 
     void HandleStatus(Client *c, std::string const &statusVal);
 
-    void DispatchRequest(Client *c, std::string const &request,
-                         std::string mid = std::string());
+    void DispatchRequest(Client *c, std::string const &request, std::string mid = std::string());
 
     void PublishOperationalDescription();
 
@@ -98,27 +95,27 @@ public:
     void InitializeLabNodes();
 
 	void SendEventRecord(const AMM::UUID &erID,
-	                               const AMM::FMA_Location &location, const AMM::UUID &agentID, const std::string &type);
+	                               const AMM::FMA_Location &location, const AMM::UUID &agentID, const std::string &type) const;
 
 	void SendRenderModification(const AMM::UUID &erID,
-	                                      const std::string &type, const std::string &payload);
+	                                      const std::string &type, const std::string &payload) const;
 
 	void SendPhysiologyModification(const AMM::UUID &erID,
-	                                          const std::string &type, const std::string &payload);
+	                                          const std::string &type, const std::string &payload) const;
 
-	void SendAssessment(const AMM::UUID &erID);
+	void SendAssessment(const AMM::UUID &erID) const;
 
-	void SendCommand(const std::string &message);
+	void SendCommand(const std::string &message) const;
 
 	void SendModuleConfiguration(const std::string &name,
-	                                       const std::string &config);
+	                                       const std::string &config) const;
 
 private:
 
 
     AMM::UUID m_uuid;
 
-    Server* s;
+    Server* s{};
 
     std::string parentId;
 

@@ -1,59 +1,40 @@
 #include "TPMS.h"
 
-TPMS::TPMS() {
 
-}
+TPMS::TPMS() {}
 
 TPMS::~TPMS() {
-
+	// Clean up dynamically allocated Manikins
+	for (auto& pair : manikins) {
+		delete pair.second;
+	}
 }
 
-void TPMS::SetID(std::string id) {
-    myID = id;
+void TPMS::SetID(const std::string& id) {
+	myID = id;
 }
 
 void TPMS::SetMode(bool podMode) {
-    mode = podMode;
+	mode = podMode;
 }
 
-void TPMS::InitializeManikin(std::string manikinId) {
-    if (manikinId == "manikin_1") {
-        mgr1 = new Manikin("manikin_1", mode, myID);
-    } else if (manikinId == "manikin_2") {
-        mgr2 = new Manikin("manikin_2", mode, myID);
-    } else if (manikinId == "manikin_3") {
-        mgr3 = new Manikin("manikin_3", mode, myID);
-    } else if (manikinId == "manikin_4") {
-        mgr4 = new Manikin("manikin_4", mode, myID);
-    }
-
+void TPMS::InitializeManikin(const std::string& manikinId) {
+	// Check if the manikin already exists
+	if (manikins.find(manikinId) == manikins.end()) {
+		manikins[manikinId] = new Manikin(manikinId, mode, myID);
+	}
 }
 
 void TPMS::InitializeManikins(int count) {
-    switch (count) {
-        case 4:
-            InitializeManikin("manikin_4");
-        case 3:
-            InitializeManikin("manikin_3");
-        case 2:
-            InitializeManikin("manikin_2");
-        case 1:
-            InitializeManikin("manikin_1");
-        default:
-            break;
-    }
+	for (int i = 1; i <= count; ++i) {
+		InitializeManikin("manikin_" + std::to_string(i));
+	}
 }
 
-Manikin *TPMS::GetManikin(std::string mid) {
-    if (mid == "manikin_1") {
-        return mgr1;
-    } else if (mid == "manikin_2") {
-        return mgr2;
-    } else if (mid == "manikin_3") {
-        return mgr3;
-    } else if (mid == "manikin_4") {
-        return mgr4;
-    }
-    return mgr1;
+Manikin* TPMS::GetManikin(const std::string& manikinId) {
+	auto it = manikins.find(manikinId);
+	if (it != manikins.end()) {
+		return it->second;
+	}
+	return nullptr; // Return nullptr if the manikin ID is not found
 }
-

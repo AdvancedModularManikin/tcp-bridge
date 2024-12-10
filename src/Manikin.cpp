@@ -1,16 +1,12 @@
 
 #include "Manikin.h"
 
-using namespace std;
-using namespace std::chrono;
 using namespace AMM;
-using namespace tinyxml2;
 
 namespace bp = boost::process;
 
-
-Manikin::Manikin(std::string mid, bool pm, std::string pid) {
-	parentId = pid;
+Manikin::Manikin(const std::string& mid, bool pm, std::string pid) {
+	parentId = std::move(pid);
 	podMode = pm;
 	manikin_id = mid;
 
@@ -59,17 +55,12 @@ Manikin::Manikin(std::string mid, bool pm, std::string pid) {
 	mgr->CreateCommandPublisher();
 	mgr->CreateInstrumentDataPublisher();
 	mgr->CreateAssessmentPublisher();
-	m_uuid.id(mgr->GenerateUuidString());
+	m_uuid.id(AMM::DDSManager<Manikin>::GenerateUuidString());
 
 	std::this_thread::sleep_for(std::chrono::milliseconds(250));
 }
 
-void Manikin::SetServer(Server *srv) {
-	s = srv;
-
-}
-
-void Manikin::sendConfig(Client *c, std::string scene, std::string clientType) {
+void Manikin::sendConfig(Client *c, const std::string& scene, const std::string& clientType) {
 	ostringstream static_filename;
 	static_filename << "static/module_configuration_static/" << scene << "_"
 	                << clientType << "_configuration.xml";
@@ -83,7 +74,7 @@ void Manikin::sendConfig(Client *c, std::string scene, std::string clientType) {
 	Server::SendToClient(c, encodedConfig);
 }
 
-void Manikin::sendConfigToAll(std::string scene) {
+void Manikin::sendConfigToAll(const std::string& scene) {
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
@@ -109,11 +100,11 @@ void Manikin::MakeSecondary() {
 
 }
 
-std::string Manikin::ExtractType(std::string in) {
+std::string Manikin::ExtractType(const std::string& in) {
 	std::size_t pos = in.find("type=");
 	if (pos != std::string::npos) {
 		std::string mid1 = in.substr(pos + 5);
-		std::size_t pos1 = mid1.find(";");
+		std::size_t pos1 = mid1.find(';');
 		if (pos1 != std::string::npos) {
 			std::string mid2 = mid1.substr(0, pos1);
 			return mid2;
@@ -123,11 +114,11 @@ std::string Manikin::ExtractType(std::string in) {
 	return {};
 }
 
-std::string Manikin::ExtractServiceFromCommand(std::string in) {
+std::string Manikin::ExtractServiceFromCommand(const std::string& in) {
 	std::size_t pos = in.find("service=");
 	if (pos != std::string::npos) {
 		std::string mid1 = in.substr(pos + 8);
-		std::size_t pos1 = mid1.find(";");
+		std::size_t pos1 = mid1.find(';');
 		if (pos1 != std::string::npos) {
 			std::string mid2 = mid1.substr(0, pos1);
 			return mid2;
@@ -490,7 +481,7 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 	if (rendModPayload.find("CHOSE_ROLE") != std::string::npos) {
 		LOG_INFO << "Role chooser, break up participant: " << practitioner;
 		std::vector<std::string> participant_data = split(practitioner, ':');
-		std::string pid = participant_data[1];
+		const std::string& pid = participant_data[1];
 		ConnectionData gc = GetGameClient(pid);
 		const auto p1 = std::chrono::system_clock::now();
 		gc.role = participant_data[0];
@@ -540,7 +531,7 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
 			LOG_INFO << "Message recieved; Run sim.";
 			std::ostringstream tmsg;
 			tmsg << "[SYS]START_SIM" << ";mid=" << manikin_id << std::endl;
-			s->SendToAll(tmsg.str());
+			Server::SendToAll(tmsg.str());
 			break;
 		}
 
@@ -553,7 +544,7 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
 			LOG_INFO << "Message recieved; Halt sim";
 			std::ostringstream tmsg;
 			tmsg << "[SYS]PAUSE_SIM" << ";mid=" << manikin_id << std::endl;
-			s->SendToAll(tmsg.str());
+			Server::SendToAll(tmsg.str());
 			break;
 		}
 
@@ -563,7 +554,7 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
 			LOG_INFO << "Message recieved; Reset sim";
 			std::ostringstream tmsg;
 			tmsg << "[SYS]RESET_SIM" << ";mid=" << manikin_id << std::endl;
-			s->SendToAll(tmsg.str());
+			Server::SendToAll(tmsg.str());
 			break;
 		}
 
@@ -617,7 +608,7 @@ void Manikin::onNewOperationalDescription(AMM::OperationalDescription &opD, Samp
 	}
 }
 
-void Manikin::SendEventRecord(const AMM::UUID &erID, const AMM::FMA_Location &location, const AMM::UUID &agentID, const std::string &type) {
+void Manikin::SendEventRecord(const AMM::UUID &erID, const AMM::FMA_Location &location, const AMM::UUID &agentID, const std::string &type) const {
 	AMM::EventRecord er;
 	er.id(erID);
 	er.location(location);
@@ -627,7 +618,7 @@ void Manikin::SendEventRecord(const AMM::UUID &erID, const AMM::FMA_Location &lo
 }
 
 void Manikin::SendRenderModification(const AMM::UUID &erID,
-                             const std::string &type, const std::string &payload) {
+                             const std::string &type, const std::string &payload) const {
 	AMM::RenderModification renderMod;
 
 
@@ -646,7 +637,7 @@ void Manikin::SendRenderModification(const AMM::UUID &erID,
 }
 
 void Manikin::SendPhysiologyModification(const AMM::UUID &erID,
-                                 const std::string &type, const std::string &payload) {
+                                 const std::string &type, const std::string &payload) const {
 	AMM::PhysiologyModification physMod;
 	physMod.event_id(erID);
 	physMod.type(type);
@@ -654,20 +645,20 @@ void Manikin::SendPhysiologyModification(const AMM::UUID &erID,
 	mgr->WritePhysiologyModification(physMod);
 }
 
-void Manikin::SendAssessment(const AMM::UUID &erID) {
+void Manikin::SendAssessment(const AMM::UUID &erID) const {
 	AMM::Assessment assessment;
 	assessment.event_id(erID);
 	mgr->WriteAssessment(assessment);
 }
 
-void Manikin::SendCommand(const std::string &message) {
+void Manikin::SendCommand(const std::string &message) const {
 	AMM::Command cmdInstance;
 	cmdInstance.message(message);
 	mgr->WriteCommand(cmdInstance);
 }
 
 void Manikin::SendModuleConfiguration(const std::string &name,
-                              const std::string &config) {
+                              const std::string &config) const {
 	AMM::ModuleConfiguration mc;
 	mc.name(name);
 	mc.capabilities_configuration(config);
@@ -683,39 +674,39 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 			currentStatus = "RUNNING";
 			isPaused = false;
 			AMM::SimulationControl simControl;
-			auto ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+			auto ms = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::RUN);
 			mgr->WriteSimulationControl(simControl);
 			std::string tmsg = "ACT=START_SIM;mid=" + manikin_id;
-			s->SendToAll(tmsg);
+			Server::SendToAll(tmsg);
 		} else if (value.find("STOP_SIM") != std::string::npos) {
 			currentStatus = "NOT RUNNING";
 			isPaused = false;
 			AMM::SimulationControl simControl;
-			auto ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+			auto ms = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::HALT);
 			mgr->WriteSimulationControl(simControl);
 			std::string tmsg = "ACT=STOP_SIM;mid=" + manikin_id;
-			s->SendToAll(tmsg);
+			Server::SendToAll(tmsg);
 		} else if (value.find("PAUSE_SIM") != std::string::npos) {
 			currentStatus = "PAUSED";
 			isPaused = true;
 			AMM::SimulationControl simControl;
-			auto ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+			auto ms = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::HALT);
 			mgr->WriteSimulationControl(simControl);
 			std::string tmsg = "ACT=PAUSE_SIM;mid=" + manikin_id;
-			s->SendToAll(tmsg);
+			Server::SendToAll(tmsg);
 		} else if (value.find("RESET_SIM") != std::string::npos) {
 			currentStatus = "NOT RUNNING";
 			isPaused = false;
 			std::string tmsg = "ACT=RESET_SIM;mid=" + manikin_id;
-			s->SendToAll(tmsg);
+			Server::SendToAll(tmsg);
 			AMM::SimulationControl simControl;
-			auto ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+			auto ms = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::RESET);
 			mgr->WriteSimulationControl(simControl);
@@ -723,7 +714,7 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 			// } else if (value.find("PUBLISH_ASSESSMENT") != std::string::npos) {
 			//     LOG_INFO << "Command to publish assessments: " << value;
 		} else if (value.find("RESTART_SERVICE") != std::string::npos) {
-			if (mid == parentId || podMode == false) {
+			if (mid == parentId || !podMode) {
 				std::string service = ExtractServiceFromCommand(value);
 				LOG_INFO << "Command to restart service " << service;
 				if (service.find("all") != std::string::npos) {
@@ -780,7 +771,7 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 			if (result == 0) {
 				std::ostringstream tmsg;
 				tmsg << "REMOTE=DISABLED" << std::endl;
-				s->SendToAll(tmsg.str());
+				Server::SendToAll(tmsg.str());
 			}
 		} else if (value.find("SET_PRIMARY") != std::string::npos) {
 			if (mid == parentId) {
@@ -794,12 +785,12 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 			currentStatus = "NOT RUNNING";
 			isPaused = true;
 			AMM::SimulationControl simControl;
-			auto ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+			auto ms = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::HALT);
 			mgr->WriteSimulationControl(simControl);
 			std::string tmsg = "ACT=END_SIMULATION_SIM;mid=" + manikin_id;
-			s->SendToAll(tmsg);
+			Server::SendToAll(tmsg);
 		} else if (value.find("ENABLE_REMOTE") != std::string::npos) {
 			std::string remoteData = value.substr(sizeof("ENABLE_REMOTE"));
 			LOG_INFO << "Enabling remote with options:" << remoteData;
@@ -809,14 +800,14 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 
 			BOOST_FOREACH(std::string
 					              token, tokenList) {
-							size_t sep_pos = token.find_first_of("=");
-							std::string key = token.substr(0, sep_pos);
-							boost::algorithm::to_lower(key);
-							std::string value = (sep_pos == std::string::npos ? "" : token.substr(
+							size_t sep_pos = token.find_first_of('=');
+							std::string kvp_key = token.substr(0, sep_pos);
+							boost::algorithm::to_lower(kvp_key);
+							std::string kvp_value = (sep_pos == std::string::npos ? "" : token.substr(
 									sep_pos + 1,
 									std::string::npos));
-							kvp[key] = value;
-							LOG_DEBUG << "\t" << key << " => " << kvp[key];
+							kvp[kvp_key] = kvp_value;
+							LOG_DEBUG << "\t" << kvp_key << " => " << kvp[kvp_key];
 						}
 
 			if (kvp.find("password") != kvp.end()) {
@@ -846,7 +837,7 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 					tmsg << "REMOTE=DISABLED" << std::endl;
 				}
 			}
-			s->SendToAll(tmsg.str());
+			Server::SendToAll(tmsg.str());
 		} else if (value.find("UPDATE_CLIENT") != std::string::npos) {
 			std::string clientData = value.substr(sizeof("UPDATE_CLIENT"));
 			LOG_DEBUG << "Updating client with client data:" << clientData;
@@ -856,14 +847,14 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 
 			BOOST_FOREACH(std::string
 					              token, tokenList) {
-							size_t sep_pos = token.find_first_of("=");
-							std::string key = token.substr(0, sep_pos);
-							boost::algorithm::to_lower(key);
-							std::string value = (sep_pos == std::string::npos ? "" : token.substr(
+							size_t sep_pos = token.find_first_of('=');
+							std::string kvp_key = token.substr(0, sep_pos);
+							boost::algorithm::to_lower(kvp_key);
+							std::string kvp_value = (sep_pos == std::string::npos ? "" : token.substr(
 									sep_pos + 1,
 									std::string::npos));
-							kvp[key] = value;
-							LOG_TRACE << "\t" << key << " => " << kvp[key];
+							kvp[kvp_key] = value;
+							LOG_TRACE << "\t" << kvp_key << " => " << kvp[kvp_key];
 						}
 
 			std::string client_id;
@@ -903,7 +894,7 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 
 			std::ostringstream messageOut;
 			messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
-			s->SendToAll(messageOut.str());
+			Server::SendToAll(messageOut.str());
 		} else if (value.find("KICK") != std::string::npos) {
 			std::string kickC = value.substr(sizeof("KICK"));
 			LOG_INFO << "Got kick via DDS bus command.";
@@ -922,23 +913,23 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 			sendConfigToAll(currentScenario);
 			std::ostringstream messageOut;
 			messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
-			s->SendToAll(messageOut.str());
+			Server::SendToAll(messageOut.str());
 		} else if (!value.compare(0, loadPrefix.size(), loadPrefix)) {
 			currentState = value.substr(loadStatePrefix.size());
 			std::ostringstream messageOut;
 			messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
-			s->SendToAll(messageOut.str());
+			Server::SendToAll(messageOut.str());
 		} else {
 			std::ostringstream messageOut;
 			messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
 			LOG_INFO << "Sending unknown system message: " << messageOut.str();
-			s->SendToAll(messageOut.str());
+			Server::SendToAll(messageOut.str());
 		}
 	} else {
 		std::ostringstream messageOut;
 		messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
 		LOG_INFO << "Sending unknown message: " << messageOut.str();
-		s->SendToAll(messageOut.str());
+		Server::SendToAll(messageOut.str());
 	}
 }
 
@@ -967,7 +958,7 @@ void Manikin::PublishSettings(std::string const &equipmentType) {
 }
 
 void Manikin::HandleSettings(Client *c, std::string const &settingsVal) {
-	XMLDocument doc(false);
+	tinyxml2::XMLDocument doc(false);
 	doc.Parse(settingsVal.c_str());
 	tinyxml2::XMLNode *root =
 			doc.FirstChildElement("AMMModuleConfiguration");
@@ -999,7 +990,7 @@ void Manikin::HandleSettings(Client *c, std::string const &settingsVal) {
 }
 
 void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
-	XMLDocument doc(false);
+	tinyxml2::XMLDocument doc(false);
 	doc.Parse(capabilityVal.c_str());
 	tinyxml2::XMLNode *root = doc.FirstChildElement("AMMModuleConfiguration");
 	tinyxml2::XMLElement *module = root->FirstChildElement("module")->ToElement();
@@ -1027,16 +1018,15 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 
 	mgr->WriteOperationalDescription(od);
 
+	std::lock_guard<std::mutex> lock(m_mapmutex);
+
 	// Set the client's type
-	ServerThread::LockMutex(c->id);
 	c->SetClientType(nodeName);
 	try {
-	  std::lock_guard<std::mutex> lock(m_mapmutex);
 	  clientTypeMap.insert({c->id, nodeName});
 	} catch (exception &e) {
 	  LOG_ERROR << "Unable to insert into clientTypeMap: " << e.what();
 	}
-	ServerThread::UnlockMutex(c->id);
 
 	subscribedTopics[c->id].clear();
 	publishedTopics[c->id].clear();
@@ -1072,11 +1062,11 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 				for (tinyxml2::XMLNode *sub =
 						subs->FirstChildElement("topic");
 				     sub; sub = sub->NextSibling()) {
-					tinyxml2::XMLElement *s = sub->ToElement();
-					std::string subTopicName = s->Attribute("name");
+					tinyxml2::XMLElement *sE = sub->ToElement();
+					std::string subTopicName = sE->Attribute("name");
 
-					if (s->Attribute("nodepath")) {
-						std::string subNodePath = s->Attribute("nodepath");
+					if (sE->Attribute("nodepath")) {
+						std::string subNodePath = sE->Attribute("nodepath");
 						if (subTopicName == "AMM_HighFrequencyNode_Data") {
 							subTopicName = "HF_" + subNodePath;
 						} else {
@@ -1110,7 +1100,7 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 }
 
 void Manikin::HandleStatus(Client *c, std::string const &statusVal) {
-	XMLDocument doc(false);
+	tinyxml2::XMLDocument doc(false);
 	doc.Parse(statusVal.c_str());
 
 	tinyxml2::XMLNode *root = doc.FirstChildElement("AMMModuleStatus");
@@ -1120,68 +1110,75 @@ void Manikin::HandleStatus(Client *c, std::string const &statusVal) {
 	std::string nodeName(name);
 
 	std::size_t found = statusVal.find(haltingString);
-	AMM::Status s;
-	s.module_id(m_uuid);
-	s.capability(nodeName);
+	AMM::Status status;
+	status.module_id(m_uuid);
+	status.capability(nodeName);
 	if (found != std::string::npos) {
-		s.value(AMM::StatusValue::INOPERATIVE);
+		status.value(AMM::StatusValue::INOPERATIVE);
 	} else {
-		s.value(AMM::StatusValue::OPERATIONAL);
+		status.value(AMM::StatusValue::OPERATIONAL);
 	}
-	mgr->WriteStatus(s);
+	mgr->WriteStatus(status);
 }
 
-void Manikin::DispatchRequest(Client *c, std::string const &request, std::string mid) {
+void Manikin::DispatchRequest(Client* c, const std::string& request, std::string mid) {
 	if (boost::starts_with(request, "STATUS")) {
 		LOG_DEBUG << "STATUS request";
-		std::ostringstream messageOut;
-		messageOut << "STATUS" << "=" << currentStatus << "|";
-		messageOut << "SCENARIO" << "=" << currentScenario << "|";
-		messageOut << "STATE" << "=" << currentState << "|";
-		Server::SendToClient(c, messageOut.str());
-	} else if (boost::starts_with(request, "CLIENTS")) {
-		LOG_DEBUG << "Client table request";
-		std::ostringstream messageOut;
-		messageOut << "client_id,client_name,learner_name,client_connection,client_type,role,client_status,connect_time"
-		           << std::endl;
 
-		for (const auto &c: gameClientList) {
-			ConnectionData clientData = c.second;
-			messageOut << clientData.client_id << "," << clientData.client_name << ","
-			           << clientData.learner_name << "," << clientData.client_connection << ","
-			           << clientData.client_type << "," << clientData.role << ","
-			           << clientData.client_status << "," <<
-			           clientData.connect_time << std::endl;
-			// LOG_TRACE << messageOut.str();
+		std::ostringstream messageOut;
+		messageOut << "STATUS=" << currentStatus << "|"
+		           << "SCENARIO=" << currentScenario << "|"
+		           << "STATE=" << currentState << "|";
+
+		Server::SendToClient(c, messageOut.str());
+	}
+	else if (boost::starts_with(request, "CLIENTS")) {
+		LOG_DEBUG << "Client table request";
+
+		std::ostringstream messageOut;
+		messageOut << "client_id,client_name,learner_name,client_connection,client_type,role,client_status,connect_time\n";
+
+		for (const auto& client : gameClientList) {
+			const ConnectionData& clientData = client.second;
+			messageOut << clientData.client_id << ","
+			           << clientData.client_name << ","
+			           << clientData.learner_name << ","
+			           << clientData.client_connection << ","
+			           << clientData.client_type << ","
+			           << clientData.role << ","
+			           << clientData.client_status << ","
+			           << clientData.connect_time << "\n";
 		}
 
-
 		Server::SendToClient(c, messageOut.str());
-	} else if (boost::starts_with(request, "LABS")) {
+	}
+	else if (boost::starts_with(request, "LABS")) {
 		LOG_DEBUG << "LABS request: " << request;
-		const auto equals_idx = request.find_first_of(';');
-		if (std::string::npos != equals_idx) {
-			auto str = request.substr(equals_idx + 1);
-			LOG_DEBUG << "Return lab values for " << str;
-			auto it = labNodes[str].begin();
-			while (it != labNodes[str].end()) {
-				std::ostringstream messageOut;
-				messageOut << it->first << "=" << it->second << ":" << str << ";mid=" << mid << "|";
-				Server::SendToClient(c, messageOut.str());
-				++it;
-			}
-		} else {
-			LOG_DEBUG << "No specific labs requested, return all values.";
-			auto it = labNodes["ALL"].begin();
-			while (it != labNodes["ALL"].end()) {
-				std::ostringstream messageOut;
-				messageOut << it->first << "=" << it->second << ";mid=" << mid << "|";
-				Server::SendToClient(c, messageOut.str());
-				++it;
-			}
+
+		const auto delimiterIdx = request.find_first_of(';');
+		const std::string labCategory = (delimiterIdx != std::string::npos)
+		                                ? request.substr(delimiterIdx + 1)
+		                                : "ALL";
+
+		LOG_DEBUG << "Return lab values for: " << labCategory;
+
+		const auto& labValues = labNodes[labCategory];
+		if (labValues.empty()) {
+			LOG_WARNING << "No lab values found for category: " << labCategory;
+			return;
+		}
+
+		for (const auto& lab : labValues) {
+			std::ostringstream messageOut;
+			messageOut << lab.first << "=" << lab.second << ";mid=" << mid << "|";
+			Server::SendToClient(c, messageOut.str());
 		}
 	}
+	else {
+		LOG_WARNING << "Unknown request type: " << request;
+	}
 }
+
 
 
 void Manikin::PublishOperationalDescription() {
@@ -1200,7 +1197,7 @@ void Manikin::PublishOperationalDescription() {
 
 void Manikin::PublishConfiguration() {
 	AMM::ModuleConfiguration mc;
-	auto ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+	auto ms = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 	mc.timestamp(ms);
 	mc.module_id(m_uuid);
 	mc.name(moduleName);

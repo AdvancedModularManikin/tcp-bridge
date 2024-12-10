@@ -55,10 +55,9 @@ const string sysPrefix = "[SYS]";
 const string actPrefix = "[ACT]";
 const string loadPrefix = "LOAD_STATE:";
 
+std::mutex Server::clientsMutex;
 
 TPMS pod;
-
-bool closed = false;
 
 std::string ExtractManikinIDFromString(std::string in) {
 	std::size_t pos = in.find("mid=");
@@ -93,20 +92,11 @@ void broadcastDisconnection(const ConnectionData &gc) {
 	}
 }
 
-void handleClientDisconnection(Client *c, const std::string &uuid) {
-	// Clean up socket and remove client from server resources
-	shutdown(c->sock, SHUT_RDWR);
-	close(c->sock);
+void handleClientDisconnection(Client *c) {
+	Server::RemoveClient(c);
 
-	// Mutex-protected client removal
-	ServerThread::LockMutex(uuid);
-	int index = Server::FindClientIndex(c);
-	if (index != -1) {
-		LOG_DEBUG << "Erasing client at position " << index << " with id " << Server::clients[index].id;
-		Server::clients.erase(Server::clients.begin() + index);
-	}
 	clientMap.erase(c->id);
-	ServerThread::UnlockMutex(uuid);
+
 
 	// Update game client status to DISCONNECTED
 	ConnectionData gc = GetGameClient(c->id);
@@ -271,7 +261,7 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	}
 
 	AMM::UUID erID;
-	erID.id(kvp["event_id"].empty() ? tmgr->mgr->GenerateUuidString() : kvp["event_id"]);
+	erID.id(kvp["event_id"].empty() ? AMM::DDSManager<Manikin>::GenerateUuidString() : kvp["event_id"]);
 
 	AMM::FMA_Location fma;
 	fma.name(kvp["location"]);
@@ -283,13 +273,13 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 
 	std::string modPayload = kvp["payload"];
 
-	if (modType == "") {
+	if (modType.empty()) {
 	  modType = ExtractTypeFromRenderMod(modPayload);
 	}
 	
 	if (topic == "AMM_Render_Modification") {
 	  tmgr->SendEventRecord(erID, fma, agentID, modType);
-	  if (modPayload == "") { // make a render mod payload
+	  if (modPayload.empty()) { // make a render mod payload
 	      std::ostringstream tPayload;
 	      tPayload << "<RenderModification type='" << modType << "'/>";	      
 	      tmgr->SendRenderModification(erID, modType, tPayload.str());
@@ -363,14 +353,14 @@ void *Server::HandleClient(void *args) {
 	std::string uuid = gen_random(10);
 
 	// Mutex management and client setup
-	ServerThread::LockMutex(uuid);
+	std::lock_guard<std::mutex> lock(clientsMutex);
 	c->SetId(uuid);
 	string defaultName = "Client " + c->id;
 	c->SetName(defaultName);
 	Server::clients.push_back(*c);
 	clientMap[c->id] = uuid;
 	LOG_DEBUG << "Adding client with id: " << c->id;
-	ServerThread::UnlockMutex(uuid);
+
 
 	// Initialize game client data
 	auto gc = GetGameClient(c->id);
@@ -386,7 +376,7 @@ void *Server::HandleClient(void *args) {
 		// Check if client disconnected
 		if (n == 0) {
 			LOG_INFO << c->name << " disconnected";
-			handleClientDisconnection(c, uuid);
+			handleClientDisconnection(c);
 			break;
 		} else if (n < 0) {
 			LOG_ERROR << "Error while receiving message from client: " << c->name;
@@ -431,19 +421,9 @@ void UdpDiscoveryThread(short port, bool enabled, std::string manikin_id) {
 	}
 }
 
-static void show_usage(const std::string &name) {
-	std::cerr << "Usage: " << name << " <option(s)>"
-	          << "\nOptions:\n"
-	          << "\t-p,--pod\t\tTPMS/pod mode\n"
-	          << "\t-h,--help\t\tShow this help message\n"
-	          << std::endl;
-}
-
-
 int main(int argc, const char *argv[]) {
 	static plog::ColorConsoleAppender <plog::TxtFormatter> consoleAppender;
 	plog::init(plog::verbose, &consoleAppender);
-
 
 	short discoveryPort = 8888;
 	int bridgePort = 9015;
