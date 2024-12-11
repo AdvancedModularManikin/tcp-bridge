@@ -42,4 +42,6 @@ private:
 	// Static shared resources
 	static std::vector<Client> clients;
 	static std::mutex clientsMutex;
+
+	static void CreateClient(Client *c, string &uuid);
 };

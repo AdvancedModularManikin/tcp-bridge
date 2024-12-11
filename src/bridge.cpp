@@ -1,7 +1,9 @@
-
 #include "bridge.h"
 
+std::mutex gcMapMutex;
+
 ConnectionData GetGameClient(std::string id) {
+	std::lock_guard<std::mutex> lock(gcMapMutex);
     auto i = gameClientList.find(id);
     if (i == gameClientList.end()) {
         return {};
@@ -13,6 +15,7 @@ ConnectionData GetGameClient(std::string id) {
 
 
 void UpdateGameClient(std::string id, ConnectionData cData) {
+	std::lock_guard<std::mutex> lock(gcMapMutex);
     gameClientList.insert_or_assign(id, cData);
     // PublishClientDataUpdate(cData);
 }
@@ -33,7 +36,7 @@ std::string ExtractTypeFromRenderMod(std::string payload) {
     std::size_t pos = payload.find("type=");
     if (pos != std::string::npos) {
         std::string p1 = payload.substr(pos + 6);
-        std::size_t pos2 = p1.find("\"");
+        std::size_t pos2 = p1.find('\"');
         if (pos2 != std::string::npos) {
             std::string p2 = p1.substr(0, pos2);
             return p2;
@@ -64,7 +67,7 @@ std::string ExtractIDFromString(std::string in) {
     std::size_t pos = in.find("mid=");
     if (pos != std::string::npos) {
         std::string mid1 = in.substr(pos + 4);
-        std::size_t pos1 = mid1.find(";");
+        std::size_t pos1 = mid1.find(';');
         if (pos1 != std::string::npos) {
             std::string mid2 = mid1.substr(0, pos1);
             return mid2;

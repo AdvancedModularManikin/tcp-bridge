@@ -353,13 +353,7 @@ void *Server::HandleClient(void *args) {
 	std::string uuid = gen_random(10);
 
 	// Mutex management and client setup
-	std::lock_guard<std::mutex> lock(clientsMutex);
-	c->SetId(uuid);
-	string defaultName = "Client " + c->id;
-	c->SetName(defaultName);
-	Server::clients.push_back(*c);
-	clientMap[c->id] = uuid;
-	LOG_DEBUG << "Adding client with id: " << c->id;
+	CreateClient(c, uuid);
 
 
 	// Initialize game client data
@@ -407,6 +401,16 @@ void *Server::HandleClient(void *args) {
 		}
 	}
 	return nullptr;
+}
+
+void Server::CreateClient(Client *c, string &uuid) {
+	std::lock_guard<std::mutex> lock(clientsMutex);
+	c->SetId(uuid);
+	string defaultName = "Client " + c->id;
+	c->SetName(defaultName);
+	clients.push_back(*c);
+	clientMap[c->id] = uuid;
+	LOG_DEBUG << "Adding client with id: " << c->id;
 }
 
 
