@@ -359,7 +359,8 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
 
 	LOG_DEBUG << "[TPMS] Received an event record of type " << er.type()
 	          << " from manikin " << manikin_id;
-	eventRecords[er.id().id()] = er;
+	/*
+	 * eventRecords[er.id().id()] = er;
 	location = er.location().name();
 	practitioner = er.agent_id().id();
 	eType = er.type();
@@ -392,7 +393,7 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
 			}
 		}
 		++it;
-	}
+	}*/
 }
 
 void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo_t *info) {
@@ -425,6 +426,7 @@ void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo
 	LOG_DEBUG << "Received an assessment via DDS, republishing to TCP clients: " << stringOut;
 
 	auto it = clientMap.begin();
+
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
 		std::vector<std::string> subV = subscribedTopics[cid];
