@@ -93,16 +93,16 @@ void broadcastDisconnection(const ConnectionData &gc) {
 }
 
 void handleClientDisconnection(Client *c) {
-	Server::RemoveClient(c);
-
-	clientMap.erase(c->id);
-
-
 	// Update game client status to DISCONNECTED
 	ConnectionData gc = GetGameClient(c->id);
 	gc.client_status = "DISCONNECTED";
 	UpdateGameClient(c->id, gc);
 	broadcastDisconnection(gc);
+
+	std::lock_guard<std::mutex> lock(Server::clientsMutex);
+	clientMap.erase(c->id);
+
+	Server::RemoveClient(c);
 }
 
 // Handler for client registration
@@ -168,10 +168,14 @@ void handleStatusMessage(Client *c, const std::string &message) {
 void handleCapabilityMessage(Client *c, const std::string &message) {
 	std::string encodedCapabilities = message.substr(capabilityPrefix.size());
 	std::string capabilities;
+	std::ostringstream ack;
+
 	try {
 		capabilities = Utility::decode64(encodedCapabilities);
 	} catch (std::exception &e) {
 		LOG_ERROR << "Error decoding base64 capabilities: " << e.what();
+		ack << "ERROR_IN_CAPABILITIES_RECEIVED=" << c->id << std::endl;
+		Server::SendToClient(c, ack.str());
 		return;
 	}
 
@@ -182,7 +186,6 @@ void handleCapabilityMessage(Client *c, const std::string &message) {
 	if (tmgr) tmgr->HandleCapabilities(c, capabilities);
 
 	// Send acknowledgment
-	std::ostringstream ack;
 	ack << "CAPABILITIES_RECEIVED=" << c->id << std::endl;
 	Server::SendToClient(c, ack.str());
 }
@@ -244,6 +247,13 @@ void parseKeyValuePairs(const std::string &message, std::map <std::string, std::
 		} else {
 			// Log a warning if the token is malformed
 			LOG_WARNING << "Malformed token in message: " << token;
+			std::string key = token.substr(0, sep_pos);
+			std::string value = token.substr(sep_pos + 1);
+
+			// Trim whitespace and convert key to lowercase for consistency
+			boost::trim(key);
+			boost::trim(value);
+			boost::to_lower(key);
 		}
 	}
 }
@@ -252,13 +262,20 @@ void parseKeyValuePairs(const std::string &message, std::map <std::string, std::
 
 // Handler for physiological and render modifications
 void handleModificationMessage(Client *c, const std::string &message, const std::string &topic) {
-	std::map<std::string, std::string> kvp;
-	parseKeyValuePairs(message, kvp);
 	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
 	if (!tmgr) {
 		LOG_ERROR << "No manikin manager available for modification message.";
 		return;
 	}
+
+	// Command's don't need to be extracted
+	if (topic == "AMM_Command") {
+		LOG_INFO << "Sending command: " << message;
+		return tmgr->SendCommand(message);
+	}
+
+	std::map<std::string, std::string> kvp;
+	parseKeyValuePairs(message, kvp);
 
 	AMM::UUID erID;
 	erID.id(kvp["event_id"].empty() ? AMM::DDSManager<Manikin>::GenerateUuidString() : kvp["event_id"]);
@@ -289,7 +306,7 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	} else if (topic == "AMM_Physiology_Modification") {
 		tmgr->SendEventRecord(erID, fma, agentID, modType);
 		tmgr->SendPhysiologyModification(erID, modType, modPayload);
-	} else if (topic == "AMM_Assessment") {
+	} else if (topic == "AMM_Assessment" || topic == "AMM_Performance_Assessment") {
 		tmgr->SendEventRecord(erID, fma, agentID, modType);
 		tmgr->SendAssessment(erID);
 	} else if (topic == "AMM_Command") {
@@ -355,6 +372,7 @@ void *Server::HandleClient(void *args) {
 	// Mutex management and client setup
 	CreateClient(c, uuid);
 
+	clientMap[c->id] = uuid;
 
 	// Initialize game client data
 	auto gc = GetGameClient(c->id);
@@ -409,7 +427,6 @@ void Server::CreateClient(Client *c, string &uuid) {
 	string defaultName = "Client " + c->id;
 	c->SetName(defaultName);
 	clients.push_back(*c);
-	clientMap[c->id] = uuid;
 	LOG_DEBUG << "Adding client with id: " << c->id;
 }
 

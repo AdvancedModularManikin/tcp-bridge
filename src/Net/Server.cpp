@@ -73,7 +73,7 @@ void Server::AcceptAndDispatch() {
 
 // Send a message to all clients
 void Server::SendToAll(const std::string& message) {
-	std::lock_guard<std::mutex> lock(clientsMutex);
+//	std::lock_guard<std::mutex> lock(clientsMutex);
 
 	for (auto& client : clients) {
 		if (send(client.sock, message.c_str(), message.length(), 0) < 0) {
@@ -89,7 +89,7 @@ void Server::SendToAll(char* message) {
 
 // Send a message to a specific client
 void Server::SendToClient(Client* client, const std::string& message) {
-	std::lock_guard<std::mutex> lock(clientsMutex);
+	// std::lock_guard<std::mutex> lock(clientsMutex);
 
 	if (send(client->sock, message.c_str(), message.length(), 0) < 0) {
 		LOG_ERROR << "Error sending to client " << client->id << ": " << strerror(errno);
@@ -109,9 +109,6 @@ void Server::ListClients() {
 void Server::RemoveClient(Client* client) {
 	std::lock_guard<std::mutex> lock(clientsMutex);
 
-	shutdown(client->sock, SHUT_RDWR);
-	close(client->sock);
-
 	int index = FindClientIndex(client);
 	if (index != -1) {
 		clients.erase(clients.begin() + index);
@@ -119,6 +116,9 @@ void Server::RemoveClient(Client* client) {
 	} else {
 		LOG_ERROR << "Client not found for removal: " << client->id;
 	}
+
+	// shutdown(client->sock, SHUT_RDWR);
+	close(client->sock);
 }
 
 // Find the index of a client in the list

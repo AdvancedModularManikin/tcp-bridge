@@ -29,6 +29,8 @@ public:
 	static int FindClientIndex(Client* client);
 	static void RemoveClient(Client* client);
 
+	static std::mutex clientsMutex;
+
 private:
 	// Utility and internal operations
 	static void ListClients();
@@ -41,7 +43,6 @@ private:
 
 	// Static shared resources
 	static std::vector<Client> clients;
-	static std::mutex clientsMutex;
 
 	static void CreateClient(Client *c, string &uuid);
 };

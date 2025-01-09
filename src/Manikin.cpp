@@ -5,7 +5,7 @@ using namespace AMM;
 
 namespace bp = boost::process;
 
-Manikin::Manikin(const std::string& mid, bool pm, std::string pid) {
+Manikin::Manikin(const std::string &mid, bool pm, std::string pid) {
 	parentId = std::move(pid);
 	podMode = pm;
 	manikin_id = mid;
@@ -15,7 +15,7 @@ Manikin::Manikin(const std::string& mid, bool pm, std::string pid) {
 		LOG_INFO << "\tCurrently in POD/TPMS mode.";
 	}
 	//	mgr = new DDSManager<Manikin>(config_file, manikin_id);
-	mgr = std::make_unique<DDSManager<Manikin>>(config_file, manikin_id);
+	mgr = std::make_unique < DDSManager < Manikin >> (config_file, manikin_id);
 
 	mgr->InitializeCommand();
 	mgr->InitializeInstrumentData();
@@ -60,12 +60,20 @@ Manikin::Manikin(const std::string& mid, bool pm, std::string pid) {
 	std::this_thread::sleep_for(std::chrono::milliseconds(250));
 }
 
-void Manikin::sendConfig(Client *c, const std::string& scene, const std::string& clientType) {
+void Manikin::sendConfig(Client *c, const std::string &scene, const std::string &clientType) {
 	ostringstream static_filename;
 	static_filename << "static/module_configuration_static/" << scene << "_"
 	                << clientType << "_configuration.xml";
+
 	LOG_DEBUG << "Sending " << static_filename.str() << " to " << c->id;
 	std::ifstream ifs(static_filename.str());
+
+	if (ifs.fail()) {
+		LOG_WARNING << "Static configuration file for client type " << clientType << " to load scenario " << scene
+		            << " does not exist";
+		return;
+	}
+
 	std::string configContent((std::istreambuf_iterator<char>(ifs)),
 	                          (std::istreambuf_iterator<char>()));
 	std::string encodedConfigContent = Utility::encode64(configContent);
@@ -74,13 +82,15 @@ void Manikin::sendConfig(Client *c, const std::string& scene, const std::string&
 	Server::SendToClient(c, encodedConfig);
 }
 
-void Manikin::sendConfigToAll(const std::string& scene) {
+void Manikin::sendConfigToAll(const std::string &scene) {
+	LOG_DEBUG << "Sending config to all for scene " << scene;
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
 		std::string clientType = clientTypeMap[it->first];
 		Client *c = Server::GetClientByIndex(cid);
 		if (c) {
+			LOG_DEBUG << "Sending data to client " << cid << ", type " << clientType << " for scene " << scene;
 			sendConfig(c, scene, clientType);
 		}
 		++it;
@@ -89,18 +99,18 @@ void Manikin::sendConfigToAll(const std::string& scene) {
 
 void Manikin::MakePrimary() {
 	LOG_INFO << "Making " << parentId << " into the primary.";
-	bp::system("supervisorctl start amm_startup");
-	bp::system("supervisorctl start amm_tpms_bridge");
+	// bp::system("supervisorctl start amm_startup");
+	// bp::system("supervisorctl start amm_tpms_bridge");
 }
 
 void Manikin::MakeSecondary() {
 	LOG_INFO << "Making " << parentId << " into a secondary.";
-	bp::system("supervisorctl start amm_startup");
-	bp::system("supervisorctl stop amm_tpms_bridge");
+	// bp::system("supervisorctl start amm_startup");
+	// bp::system("supervisorctl stop amm_tpms_bridge");
 
 }
 
-std::string Manikin::ExtractType(const std::string& in) {
+std::string Manikin::ExtractType(const std::string &in) {
 	std::size_t pos = in.find("type=");
 	if (pos != std::string::npos) {
 		std::string mid1 = in.substr(pos + 5);
@@ -114,7 +124,7 @@ std::string Manikin::ExtractType(const std::string& in) {
 	return {};
 }
 
-std::string Manikin::ExtractServiceFromCommand(const std::string& in) {
+std::string Manikin::ExtractServiceFromCommand(const std::string &in) {
 	std::size_t pos = in.find("service=");
 	if (pos != std::string::npos) {
 		std::string mid1 = in.substr(pos + 8);
@@ -155,10 +165,11 @@ void Manikin::onNewStatus(AMM::Status &st, SampleInfo_t *info) {
 
 	LOG_TRACE << " Sending status message to clients: " << messageOut.str();
 
+	std::lock_guard <std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector<std::string> subV = subscribedTopics[cid];
+		std::vector <std::string> subV = subscribedTopics[cid];
 
 		if (std::find(subV.begin(), subV.end(), "AMM_Status") != subV.end()) {
 			Client *c = Server::GetClientByIndex(cid);
@@ -172,9 +183,9 @@ void Manikin::onNewStatus(AMM::Status &st, SampleInfo_t *info) {
 }
 
 void Manikin::onNewModuleConfiguration(AMM::ModuleConfiguration &mc, SampleInfo_t *info) {
-	LOG_DEBUG << "[TPMS] Received a module config from manikin " << manikin_id;
-	LOG_TRACE << "Module Configuration recieved for " << mc.name();
+	LOG_DEBUG << "Received module config from manikin " << manikin_id << " for " << mc.name();
 
+	std::lock_guard <std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
@@ -202,10 +213,12 @@ void Manikin::onNewModuleConfiguration(AMM::ModuleConfiguration &mc, SampleInfo_
 /// Event handler for incoming Physiology Waveform data.
 void Manikin::onNewPhysiologyWaveform(AMM::PhysiologyWaveform &n, SampleInfo_t *info) {
 	std::string hfname = "HF_" + n.name();
+	std::lock_guard <std::mutex> lock(Server::clientsMutex);
+
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector<std::string> subV = subscribedTopics[cid];
+		std::vector <std::string> subV = subscribedTopics[cid];
 		if (std::find(subV.begin(), subV.end(), hfname) != subV.end()) {
 			Client *c = Server::GetClientByIndex(cid);
 			if (c) {
@@ -232,10 +245,11 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
 		}
 	}
 
+	std::lock_guard <std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector<std::string> subV = subscribedTopics[cid];
+		std::vector <std::string> subV = subscribedTopics[cid];
 
 		if (std::find(subV.begin(), subV.end(), n.name()) != subV.end()) {
 			Client *c = Server::GetClientByIndex(cid);
@@ -254,7 +268,7 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
 }
 
 void Manikin::onNewPhysiologyModification(AMM::PhysiologyModification &pm, SampleInfo_t *info) {
-	LOG_DEBUG << "[TPMS] Received a phys mod from manikin " << manikin_id;
+	LOG_DEBUG << "Received a phys mod from manikin " << manikin_id;
 	std::string location;
 	std::string practitioner;
 
@@ -278,10 +292,11 @@ void Manikin::onNewPhysiologyModification(AMM::PhysiologyModification &pm, Sampl
 
 	LOG_DEBUG << "Received a phys mod via DDS, republishing to TCP clients: " << stringOut;
 
+	std::lock_guard <std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector<std::string> subV = subscribedTopics[cid];
+		std::vector <std::string> subV = subscribedTopics[cid];
 
 		if (std::find(subV.begin(), subV.end(), pm.type()) != subV.end() ||
 		    std::find(subV.begin(), subV.end(), "AMM_Physiology_Modification") !=
@@ -312,8 +327,7 @@ void Manikin::onNewOmittedEvent(AMM::OmittedEvent &oe, SampleInfo_t *info) {
 	er.agent_type(oe.agent_type());
 	er.data(oe.data());
 
-	LOG_DEBUG << "[TPMS] Received an omitted event record of type " << er.type()
-	          << " from manikin " << manikin_id;
+	LOG_DEBUG << "Received an omitted event record of type " << er.type() << " from manikin " << manikin_id;
 	eventRecords[er.id().id()] = er;
 	location = er.location().name();
 	practitioner = er.agent_id().id();
@@ -335,11 +349,11 @@ void Manikin::onNewOmittedEvent(AMM::OmittedEvent &oe, SampleInfo_t *info) {
 	string stringOut = messageOut.str();
 
 	LOG_DEBUG << "Received an EventRecord via DDS, republishing to TCP clients: " << stringOut;
-
+	std::lock_guard <std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector<std::string> subV = subscribedTopics[cid];
+		std::vector <std::string> subV = subscribedTopics[cid];
 		if (std::find(subV.begin(), subV.end(), "AMM_EventRecord") != subV.end()) {
 			Client *c = Server::GetClientByIndex(cid);
 			if (c) {
@@ -357,10 +371,9 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
 	std::string eData;
 	std::string pType;
 
-	LOG_DEBUG << "[TPMS] Received an event record of type " << er.type()
+	LOG_DEBUG << "Received an event record of type " << er.type()
 	          << " from manikin " << manikin_id;
-	/*
-	 * eventRecords[er.id().id()] = er;
+	eventRecords[er.id().id()] = er;
 	location = er.location().name();
 	practitioner = er.agent_id().id();
 	eType = er.type();
@@ -382,10 +395,11 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
 
 	LOG_DEBUG << "Received an EventRecord via DDS, republishing to TCP clients: " << stringOut;
 
+	std::lock_guard <std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector<std::string> subV = subscribedTopics[cid];
+		std::vector <std::string> subV = subscribedTopics[cid];
 		if (std::find(subV.begin(), subV.end(), "AMM_EventRecord") != subV.end()) {
 			Client *c = Server::GetClientByIndex(cid);
 			if (c) {
@@ -393,7 +407,7 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
 			}
 		}
 		++it;
-	}*/
+	}
 }
 
 void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo_t *info) {
@@ -425,11 +439,11 @@ void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo
 
 	LOG_DEBUG << "Received an assessment via DDS, republishing to TCP clients: " << stringOut;
 
+	std::lock_guard <std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
-
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector<std::string> subV = subscribedTopics[cid];
+		std::vector <std::string> subV = subscribedTopics[cid];
 		if (std::find(subV.begin(), subV.end(), "AMM_Assessment") != subV.end()) {
 			Client *c = Server::GetClientByIndex(cid);
 			if (c) {
@@ -461,7 +475,7 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 		// rendModType = rendMod.type();
 		rendModType = "";
 	}
-	
+
 	messageOut << "[AMM_Render_Modification]"
 	           << "id=" << rendMod.id().id() << ";"
 	           << "mid=" << manikin_id << ";"
@@ -474,16 +488,16 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 	string stringOut = messageOut.str();
 
 	if (rendModPayload.find("START_OF") == std::string::npos) {
-		LOG_INFO << "[TPMS] Render mod Message came in on manikin " << manikin_id << ", republishing to TCP: "
+		LOG_INFO << "Render mod Message came in on manikin " << manikin_id << ", republishing to TCP: "
 		         << stringOut;
 	} else {
-	  //	  LOG_DEBUG << "Inhale/exhale: " << rendModType << " - " << rendModPayload;
+		//	  LOG_DEBUG << "Inhale/exhale: " << rendModType << " - " << rendModPayload;
 	}
 
 	if (rendModPayload.find("CHOSE_ROLE") != std::string::npos) {
 		LOG_INFO << "Role chooser, break up participant: " << practitioner;
-		std::vector<std::string> participant_data = split(practitioner, ':');
-		const std::string& pid = participant_data[1];
+		std::vector <std::string> participant_data = split(practitioner, ':');
+		const std::string &pid = participant_data[1];
 		ConnectionData gc = GetGameClient(pid);
 		const auto p1 = std::chrono::system_clock::now();
 		gc.role = participant_data[0];
@@ -507,10 +521,11 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 		mgr->WriteCommand(cmdInstance);
 	}
 
+	std::lock_guard <std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector<std::string> subV = subscribedTopics[cid];
+		std::vector <std::string> subV = subscribedTopics[cid];
 		if (std::find(subV.begin(), subV.end(), rendMod.type()) != subV.end() ||
 		    std::find(subV.begin(), subV.end(), "AMM_Render_Modification") !=
 		    subV.end()) {
@@ -525,12 +540,12 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 
 void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleInfo_t *info) {
 	bool doWriteTopic = false;
-	LOG_INFO << "[TPMS] Simulation control Message came in on manikin " << manikin_id;
+	LOG_INFO << "Simulation control Message came in on manikin " << manikin_id;
 	switch (simControl.type()) {
 		case AMM::ControlType::RUN: {
 			currentStatus = "RUNNING";
 			isPaused = false;
-			LOG_INFO << "Message recieved; Run sim.";
+			LOG_INFO << "\tMessage received; Run sim.";
 			std::ostringstream tmsg;
 			tmsg << "[SYS]START_SIM" << ";mid=" << manikin_id << std::endl;
 			Server::SendToAll(tmsg.str());
@@ -543,7 +558,7 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
 			} else {
 				currentStatus = "NOT RUNNING";
 			}
-			LOG_INFO << "Message recieved; Halt sim";
+			LOG_INFO << "\tMessage received; Halt sim";
 			std::ostringstream tmsg;
 			tmsg << "[SYS]PAUSE_SIM" << ";mid=" << manikin_id << std::endl;
 			Server::SendToAll(tmsg.str());
@@ -553,7 +568,7 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
 		case AMM::ControlType::RESET: {
 			currentStatus = "NOT RUNNING";
 			isPaused = false;
-			LOG_INFO << "Message recieved; Reset sim";
+			LOG_INFO << "\tMessage received; Reset sim";
 			std::ostringstream tmsg;
 			tmsg << "[SYS]RESET_SIM" << ";mid=" << manikin_id << std::endl;
 			Server::SendToAll(tmsg.str());
@@ -561,7 +576,7 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
 		}
 
 		case AMM::ControlType::SAVE: {
-			LOG_INFO << "Message recieved; Save sim";
+			LOG_INFO << "\tMessage received; Save sim";
 			//SaveSimulation(doWriteTopic);
 			break;
 		}
@@ -569,11 +584,7 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
 }
 
 void Manikin::onNewOperationalDescription(AMM::OperationalDescription &opD, SampleInfo_t *info) {
-	LOG_INFO << "[TPMS] Operational Description Message came in on manikin " << manikin_id;
-
-	LOG_INFO << "Operational description for module " << opD.name() << " / model " << opD.model();
-
-	// [AMM_OperationalDescription]name=;description=;manufacturer=;model=;serial_number=;module_id=;module_version=;configuration_version=;AMM_version=;capabilities_configuration=(BASE64 ENCODED STRING - URLSAFE)
+	LOG_INFO << "Operational Description came in on manikin " << manikin_id << " (" << opD.name() << ")";
 
 	std::ostringstream messageOut;
 	std::string capSchema = opD.capabilities_schema().to_string();
@@ -599,7 +610,7 @@ void Manikin::onNewOperationalDescription(AMM::OperationalDescription &opD, Samp
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector<std::string> subV = subscribedTopics[cid];
+		std::vector <std::string> subV = subscribedTopics[cid];
 		if (std::find(subV.begin(), subV.end(), "AMM_OperationalDescription") != subV.end()) {
 			Client *c = Server::GetClientByIndex(cid);
 			if (c) {
@@ -610,7 +621,8 @@ void Manikin::onNewOperationalDescription(AMM::OperationalDescription &opD, Samp
 	}
 }
 
-void Manikin::SendEventRecord(const AMM::UUID &erID, const AMM::FMA_Location &location, const AMM::UUID &agentID, const std::string &type) const {
+void Manikin::SendEventRecord(const AMM::UUID &erID, const AMM::FMA_Location &location, const AMM::UUID &agentID,
+                              const std::string &type) const {
 	AMM::EventRecord er;
 	er.id(erID);
 	er.location(location);
@@ -620,18 +632,18 @@ void Manikin::SendEventRecord(const AMM::UUID &erID, const AMM::FMA_Location &lo
 }
 
 void Manikin::SendRenderModification(const AMM::UUID &erID,
-                             const std::string &type, const std::string &payload) const {
+                                     const std::string &type, const std::string &payload) const {
 	AMM::RenderModification renderMod;
 
 
 	if (!type.empty() && payload.empty()) {
-	  std::ostringstream tpayload;
-	  tpayload << "<RenderModification type='" << type << "'/>";
-	  renderMod.data(tpayload.str());	  
+		std::ostringstream tpayload;
+		tpayload << "<RenderModification type='" << type << "'/>";
+		renderMod.data(tpayload.str());
 	} else {
-	  renderMod.data(payload);
+		renderMod.data(payload);
 	}
-	
+
 	renderMod.event_id(erID);
 	renderMod.type(type);
 
@@ -639,7 +651,7 @@ void Manikin::SendRenderModification(const AMM::UUID &erID,
 }
 
 void Manikin::SendPhysiologyModification(const AMM::UUID &erID,
-                                 const std::string &type, const std::string &payload) const {
+                                         const std::string &type, const std::string &payload) const {
 	AMM::PhysiologyModification physMod;
 	physMod.event_id(erID);
 	physMod.type(type);
@@ -660,7 +672,7 @@ void Manikin::SendCommand(const std::string &message) const {
 }
 
 void Manikin::SendModuleConfiguration(const std::string &name,
-                              const std::string &config) const {
+                                      const std::string &config) const {
 	AMM::ModuleConfiguration mc;
 	mc.name(name);
 	mc.capabilities_configuration(config);
@@ -668,7 +680,7 @@ void Manikin::SendModuleConfiguration(const std::string &name,
 }
 
 void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *info) {
-	LOG_INFO << "[TPMS] Command Message came in on manikin " << manikin_id << ": " << c.message();
+	LOG_INFO << "Command Message came in on manikin " << manikin_id << ": " << c.message();
 	if (!c.message().compare(0, sysPrefix.size(), sysPrefix)) {
 		std::string value = c.message().substr(sysPrefix.size());
 		std::string mid = ExtractIDFromString(value);
@@ -676,7 +688,8 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 			currentStatus = "RUNNING";
 			isPaused = false;
 			AMM::SimulationControl simControl;
-			auto ms = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+			auto ms = duration_cast<std::chrono::milliseconds>(
+					std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::RUN);
 			mgr->WriteSimulationControl(simControl);
@@ -686,7 +699,8 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 			currentStatus = "NOT RUNNING";
 			isPaused = false;
 			AMM::SimulationControl simControl;
-			auto ms = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+			auto ms = duration_cast<std::chrono::milliseconds>(
+					std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::HALT);
 			mgr->WriteSimulationControl(simControl);
@@ -696,7 +710,8 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 			currentStatus = "PAUSED";
 			isPaused = true;
 			AMM::SimulationControl simControl;
-			auto ms = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+			auto ms = duration_cast<std::chrono::milliseconds>(
+					std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::HALT);
 			mgr->WriteSimulationControl(simControl);
@@ -708,7 +723,8 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 			std::string tmsg = "ACT=RESET_SIM;mid=" + manikin_id;
 			Server::SendToAll(tmsg);
 			AMM::SimulationControl simControl;
-			auto ms = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+			auto ms = duration_cast<std::chrono::milliseconds>(
+					std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::RESET);
 			mgr->WriteSimulationControl(simControl);
@@ -753,7 +769,6 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 						MakeSecondary();
 					}
 				} else {
-					LOG_INFO << "Starting single service.";
 					std::string command = "supervisorctl start " + service;
 					int result = bp::system(command);
 				}
@@ -777,17 +792,16 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 			}
 		} else if (value.find("SET_PRIMARY") != std::string::npos) {
 			if (mid == parentId) {
-				// we're the primary
 				MakePrimary();
 			} else {
-				// we're a secondary
 				MakeSecondary();
 			}
 		} else if (value.find("END_SIMULATION") != std::string::npos) {
 			currentStatus = "NOT RUNNING";
 			isPaused = true;
 			AMM::SimulationControl simControl;
-			auto ms = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+			auto ms = duration_cast<std::chrono::milliseconds>(
+					std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::HALT);
 			mgr->WriteSimulationControl(simControl);
@@ -796,21 +810,21 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 		} else if (value.find("ENABLE_REMOTE") != std::string::npos) {
 			std::string remoteData = value.substr(sizeof("ENABLE_REMOTE"));
 			LOG_INFO << "Enabling remote with options:" << remoteData;
-			std::list<std::string> tokenList;
+			std::list <std::string> tokenList;
 			split(tokenList, remoteData, boost::algorithm::is_any_of(";"), boost::token_compress_on);
-			std::map<std::string, std::string> kvp;
+			std::map <std::string, std::string> kvp;
 
 			BOOST_FOREACH(std::string
-					              token, tokenList) {
-							size_t sep_pos = token.find_first_of('=');
-							std::string kvp_key = token.substr(0, sep_pos);
-							boost::algorithm::to_lower(kvp_key);
-							std::string kvp_value = (sep_pos == std::string::npos ? "" : token.substr(
-									sep_pos + 1,
-									std::string::npos));
-							kvp[kvp_key] = kvp_value;
-							LOG_DEBUG << "\t" << kvp_key << " => " << kvp[kvp_key];
-						}
+			token, tokenList) {
+				size_t sep_pos = token.find_first_of('=');
+				std::string kvp_key = token.substr(0, sep_pos);
+				boost::algorithm::to_lower(kvp_key);
+				std::string kvp_value = (sep_pos == std::string::npos ? "" : token.substr(
+						sep_pos + 1,
+						std::string::npos));
+				kvp[kvp_key] = kvp_value;
+				LOG_DEBUG << "\t" << kvp_key << " => " << kvp[kvp_key];
+			}
 
 			if (kvp.find("password") != kvp.end()) {
 				SESSION_PASSWORD = kvp["password"];
@@ -823,7 +837,7 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 
 			std::ostringstream tmsg;
 			if (!isAuthorized()) {
-				LOG_INFO << "Core not authorized for REMOTE.";
+				LOG_WARNING << "Core not authorized for REMOTE.";
 				tmsg << "REMOTE=REJECTED" << std::endl;
 				std::string command = "supervisorctl stop amm_rtc_bridge";
 				int result = bp::system(command);
@@ -843,21 +857,21 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 		} else if (value.find("UPDATE_CLIENT") != std::string::npos) {
 			std::string clientData = value.substr(sizeof("UPDATE_CLIENT"));
 			LOG_DEBUG << "Updating client with client data:" << clientData;
-			std::list<std::string> tokenList;
+			std::list <std::string> tokenList;
 			split(tokenList, clientData, boost::algorithm::is_any_of(";"), boost::token_compress_on);
-			std::map<std::string, std::string> kvp;
+			std::map <std::string, std::string> kvp;
 
 			BOOST_FOREACH(std::string
-					              token, tokenList) {
-							size_t sep_pos = token.find_first_of('=');
-							std::string kvp_key = token.substr(0, sep_pos);
-							boost::algorithm::to_lower(kvp_key);
-							std::string kvp_value = (sep_pos == std::string::npos ? "" : token.substr(
-									sep_pos + 1,
-									std::string::npos));
-							kvp[kvp_key] = value;
-							LOG_TRACE << "\t" << kvp_key << " => " << kvp[kvp_key];
-						}
+			token, tokenList) {
+				size_t sep_pos = token.find_first_of('=');
+				std::string kvp_key = token.substr(0, sep_pos);
+				boost::algorithm::to_lower(kvp_key);
+				std::string kvp_value = (sep_pos == std::string::npos ? "" : token.substr(
+						sep_pos + 1,
+						std::string::npos));
+				kvp[kvp_key] = value;
+				LOG_TRACE << "\t" << kvp_key << " => " << kvp[kvp_key];
+			}
 
 			std::string client_id;
 			if (kvp.find("client_id") != kvp.end()) {
@@ -891,9 +905,7 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 				gc.client_status = kvp["client_status"];
 			}
 
-			LOG_INFO << "Updating client " << client_id;
 			UpdateGameClient(client_id, gc);
-
 			std::ostringstream messageOut;
 			messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
 			Server::SendToAll(messageOut.str());
@@ -912,25 +924,29 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 			}
 		} else if (!value.compare(0, loadScenarioPrefix.size(), loadScenarioPrefix)) {
 			currentScenario = value.substr(loadScenarioPrefix.size());
+			LOG_DEBUG << "Setting scenario: " << currentScenario;
 			sendConfigToAll(currentScenario);
 			std::ostringstream messageOut;
 			messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
+			LOG_DEBUG << "Sending " << messageOut.str() << " to all TCP clients.";
 			Server::SendToAll(messageOut.str());
 		} else if (!value.compare(0, loadPrefix.size(), loadPrefix)) {
 			currentState = value.substr(loadStatePrefix.size());
+			LOG_DEBUG << "Current state is " << loadStatePrefix;
 			std::ostringstream messageOut;
 			messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
+			LOG_DEBUG << "Sending " << messageOut.str() << " to all TCP clients.";
 			Server::SendToAll(messageOut.str());
 		} else {
 			std::ostringstream messageOut;
 			messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
-			LOG_INFO << "Sending unknown system message: " << messageOut.str();
+			LOG_WARNING << "Sending unknown system message: " << messageOut.str();
 			Server::SendToAll(messageOut.str());
 		}
 	} else {
 		std::ostringstream messageOut;
 		messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
-		LOG_INFO << "Sending unknown message: " << messageOut.str();
+		LOG_WARNING << "Sending unknown message: " << messageOut.str();
 		Server::SendToAll(messageOut.str());
 	}
 }
@@ -1020,14 +1036,14 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 
 	mgr->WriteOperationalDescription(od);
 
-	std::lock_guard<std::mutex> lock(m_mapmutex);
-
 	// Set the client's type
 	c->SetClientType(nodeName);
+
+	std::lock_guard <std::mutex> lock(m_mapmutex);
 	try {
-	  clientTypeMap.insert({c->id, nodeName});
+		clientTypeMap.insert({c->id, nodeName});
 	} catch (exception &e) {
-	  LOG_ERROR << "Unable to insert into clientTypeMap: " << e.what();
+		LOG_ERROR << "Unable to insert into clientTypeMap: " << e.what();
 	}
 
 	subscribedTopics[c->id].clear();
@@ -1075,10 +1091,9 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 							subTopicName = subNodePath;
 						}
 					}
-					std::lock_guard<std::mutex> lock(m_topicmutex);
+					std::lock_guard <std::mutex> lock(m_topicmutex);
 					Utility::add_once(subscribedTopics[c->id], subTopicName);
-					LOG_TRACE << "[" << capabilityName << "][" << c->id
-					          << "] Subscribing to " << subTopicName;
+					LOG_TRACE << "[" << capabilityName << "][" << c->id << "] Subscribing to " << subTopicName;
 				}
 			}
 
@@ -1091,10 +1106,9 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 				     pub; pub = pub->NextSibling()) {
 					tinyxml2::XMLElement *p = pub->ToElement();
 					std::string pubTopicName = p->Attribute("name");
-					std::lock_guard<std::mutex> lock(m_topicmutex);
+					std::lock_guard <std::mutex> lock(m_topicmutex);
 					Utility::add_once(publishedTopics[c->id], pubTopicName);
-					LOG_TRACE << "[" << capabilityName << "][" << c->id
-					          << "] Publishing " << pubTopicName;
+					LOG_TRACE << "[" << capabilityName << "][" << c->id << "] Publishing " << pubTopicName;
 				}
 			}
 		}
@@ -1123,25 +1137,23 @@ void Manikin::HandleStatus(Client *c, std::string const &statusVal) {
 	mgr->WriteStatus(status);
 }
 
-void Manikin::DispatchRequest(Client* c, const std::string& request, std::string mid) {
+void Manikin::DispatchRequest(Client *c, const std::string &request, std::string mid) {
 	if (boost::starts_with(request, "STATUS")) {
-		LOG_DEBUG << "STATUS request";
-
 		std::ostringstream messageOut;
 		messageOut << "STATUS=" << currentStatus << "|"
 		           << "SCENARIO=" << currentScenario << "|"
 		           << "STATE=" << currentState << "|";
 
 		Server::SendToClient(c, messageOut.str());
-	}
-	else if (boost::starts_with(request, "CLIENTS")) {
+	} else if (boost::starts_with(request, "CLIENTS")) {
 		LOG_DEBUG << "Client table request";
 
 		std::ostringstream messageOut;
-		messageOut << "client_id,client_name,learner_name,client_connection,client_type,role,client_status,connect_time\n";
+		messageOut
+				<< "client_id,client_name,learner_name,client_connection,client_type,role,client_status,connect_time\n";
 
-		for (const auto& client : gameClientList) {
-			const ConnectionData& clientData = client.second;
+		for (const auto &client: gameClientList) {
+			const ConnectionData &clientData = client.second;
 			messageOut << clientData.client_id << ","
 			           << clientData.client_name << ","
 			           << clientData.learner_name << ","
@@ -1153,8 +1165,7 @@ void Manikin::DispatchRequest(Client* c, const std::string& request, std::string
 		}
 
 		Server::SendToClient(c, messageOut.str());
-	}
-	else if (boost::starts_with(request, "LABS")) {
+	} else if (boost::starts_with(request, "LABS")) {
 		LOG_DEBUG << "LABS request: " << request;
 
 		const auto delimiterIdx = request.find_first_of(';');
@@ -1164,23 +1175,21 @@ void Manikin::DispatchRequest(Client* c, const std::string& request, std::string
 
 		LOG_DEBUG << "Return lab values for: " << labCategory;
 
-		const auto& labValues = labNodes[labCategory];
+		const auto &labValues = labNodes[labCategory];
 		if (labValues.empty()) {
 			LOG_WARNING << "No lab values found for category: " << labCategory;
 			return;
 		}
 
-		for (const auto& lab : labValues) {
+		for (const auto &lab: labValues) {
 			std::ostringstream messageOut;
 			messageOut << lab.first << "=" << lab.second << ";mid=" << mid << "|";
 			Server::SendToClient(c, messageOut.str());
 		}
-	}
-	else {
+	} else {
 		LOG_WARNING << "Unknown request type: " << request;
 	}
 }
-
 
 
 void Manikin::PublishOperationalDescription() {

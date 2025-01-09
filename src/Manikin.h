@@ -28,7 +28,7 @@ protected:
 
   std::mutex m_mapmutex;
   std::mutex m_topicmutex;
-  
+
     std::map <std::string, std::map<std::string, double>> labNodes;
 
     std::vector <std::string> primaryServices = {
@@ -66,6 +66,7 @@ public:
 
   //  AMM::DDSManager <Manikin> *mgr;
   std::unique_ptr<AMM::DDSManager<Manikin>> mgr;
+
 
     static std::string ExtractServiceFromCommand(const std::string& in);
 

@@ -27,4 +27,5 @@ private:
 
 	// Manikin management
 	std::map<std::string, Manikin*> manikins; // Map to store manikins dynamically by ID
+	// std::map<std::string, std::unique_ptr<Manikin>> manikins;
 };
