@@ -171,24 +171,27 @@ void handleCapabilityMessage(Client *c, const std::string &message) {
 	std::ostringstream ack;
 
 	try {
+		// Decode the entire Base64 string
 		capabilities = Utility::decode64(encodedCapabilities);
+
+		LOG_INFO << "Client " << c->id << " sent capabilities.";
+		// LOG_DEBUG << "Decoded capabilities: " << capabilities;
+
+		auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
+		if (tmgr) {
+			tmgr->HandleCapabilities(c, capabilities);
+		}
+
+		// Send acknowledgment
+		ack << "CAPABILITIES_RECEIVED=" << c->id << std::endl;
+		Server::SendToClient(c, ack.str());
 	} catch (std::exception &e) {
-		LOG_ERROR << "Error decoding base64 capabilities: " << e.what();
+		LOG_ERROR << "Error decoding Base64 capabilities: " << e.what();
 		ack << "ERROR_IN_CAPABILITIES_RECEIVED=" << c->id << std::endl;
 		Server::SendToClient(c, ack.str());
-		return;
 	}
-
-	LOG_INFO << "Client " << c->id << " sent capabilities.";
-	// LOG_DEBUG << "Client " << c->id << " sent capabilities: " << capabilities;
-
-	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
-	if (tmgr) tmgr->HandleCapabilities(c, capabilities);
-
-	// Send acknowledgment
-	ack << "CAPABILITIES_RECEIVED=" << c->id << std::endl;
-	Server::SendToClient(c, ack.str());
 }
+
 
 // Handler for client settings message
 void handleSettingsMessage(Client *c, const std::string &message) {
@@ -370,6 +373,64 @@ void *Server::HandleClient(void *args) {
 	std::string uuid = gen_random(10); // Generate a random UUID
 	CreateClient(client, uuid);
 
+	clientMap[client->id] = uuid;
+
+	auto gc = GetGameClient(client->id);
+	gc.client_id = client->id;
+	gc.client_connection = "TCP";
+	gc.connect_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+	UpdateGameClient(client->id, gc);
+
+	std::string messageBuffer; // Buffer for accumulating data
+
+	while (true) {
+		// Attempt to receive data
+		bytesRead = recv(client->sock, buffer.data(), buffer.size(), 0);
+
+		if (bytesRead > 0) {
+			messageBuffer.append(buffer.data(), bytesRead); // Append data to the buffer
+
+			// Process complete messages
+			size_t pos;
+			while ((pos = messageBuffer.find('\n')) != std::string::npos) {
+				std::string message = messageBuffer.substr(0, pos);
+				messageBuffer.erase(0, pos + 1); // Remove processed message
+				boost::trim(message);
+
+				if (!message.empty()) {
+					processClientMessage(client, message);
+				}
+			}
+		} else if (bytesRead == 0) {
+			// Client disconnected
+			LOG_INFO << client->name << " disconnected.";
+			handleClientDisconnection(client);
+			break;
+		} else {
+			// Error handling
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				continue; // No data available, keep going
+			} else {
+				LOG_ERROR << "Error receiving data from client " << client->name << ": " << strerror(errno);
+				handleClientDisconnection(client);
+				break;
+			}
+		}
+	}
+
+	return nullptr;
+}
+
+/*void *Server::HandleClient(void *args) {
+	auto *client = static_cast<Client *>(args);
+	if (!client) return nullptr;
+
+	std::vector<char> buffer(8192); // Buffer for incoming data
+	ssize_t bytesRead;
+
+	std::string uuid = gen_random(10); // Generate a random UUID
+	CreateClient(client, uuid);
+
 	clientMap[client->id] = uuid; // Associate client ID with UUID
 
 	auto gc = GetGameClient(client->id);
@@ -415,7 +476,7 @@ void *Server::HandleClient(void *args) {
 	}
 
 	return nullptr;
-}
+}*/
 
 void Server::CreateClient(Client *c, string &uuid) {
 	std::lock_guard<std::mutex> lock(clientsMutex);
