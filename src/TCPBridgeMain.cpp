@@ -24,13 +24,13 @@ using namespace eprosima::fastrtps::rtps;
 
 Server *s;
 
-std::map <std::string, std::string> clientMap;
-std::map <std::string, std::string> clientTypeMap;
+std::map<std::string, std::string> clientMap;
+std::map<std::string, std::string> clientTypeMap;
 
-std::map <std::string, std::vector<std::string>> subscribedTopics;
-std::map <std::string, std::vector<std::string>> publishedTopics;
-std::map <std::string, ConnectionData> gameClientList;
-std::map <std::string, std::string> globalInboundBuffer;
+std::map<std::string, std::vector<std::string>> subscribedTopics;
+std::map<std::string, std::vector<std::string>> publishedTopics;
+std::map<std::string, ConnectionData> gameClientList;
+std::map<std::string, std::string> globalInboundBuffer;
 
 std::string DEFAULT_MANIKIN_ID = "manikin_1";
 std::string CORE_ID;
@@ -226,9 +226,9 @@ void handleActionMessage(Client *c, const std::string &message) {
 	if (tmgr) tmgr->mgr->WriteCommand(cmdInstance);
 }
 
-void parseKeyValuePairs(const std::string &message, std::map <std::string, std::string> &kvp) {
+void parseKeyValuePairs(const std::string &message, std::map<std::string, std::string> &kvp) {
 	// Split the message into tokens based on semicolons
-	std::vector <std::string> tokens;
+	std::vector<std::string> tokens;
 	boost::split(tokens, message, boost::is_any_of(";"), boost::token_compress_on);
 
 	// Process each token to extract key-value pairs
@@ -257,7 +257,6 @@ void parseKeyValuePairs(const std::string &message, std::map <std::string, std::
 		}
 	}
 }
-
 
 
 // Handler for physiological and render modifications
@@ -291,18 +290,18 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	std::string modPayload = kvp["payload"];
 
 	if (modType.empty()) {
-	  modType = ExtractTypeFromRenderMod(modPayload);
+		modType = ExtractTypeFromRenderMod(modPayload);
 	}
-	
+
 	if (topic == "AMM_Render_Modification") {
-	  tmgr->SendEventRecord(erID, fma, agentID, modType);
-	  if (modPayload.empty()) { // make a render mod payload
-	      std::ostringstream tPayload;
-	      tPayload << "<RenderModification type='" << modType << "'/>";	      
-	      tmgr->SendRenderModification(erID, modType, tPayload.str());
-	    } else {	      	      
-	      tmgr->SendRenderModification(erID, modType, modPayload);
-	    }
+		tmgr->SendEventRecord(erID, fma, agentID, modType);
+		if (modPayload.empty()) { // make a render mod payload
+			std::ostringstream tPayload;
+			tPayload << "<RenderModification type='" << modType << "'/>";
+			tmgr->SendRenderModification(erID, modType, tPayload.str());
+		} else {
+			tmgr->SendRenderModification(erID, modType, modPayload);
+		}
 	} else if (topic == "AMM_Physiology_Modification") {
 		tmgr->SendEventRecord(erID, fma, agentID, modType);
 		tmgr->SendPhysiologyModification(erID, modType, modPayload);
@@ -362,62 +361,59 @@ void processClientMessage(Client *c, const std::string &message) {
 }
 
 void *Server::HandleClient(void *args) {
-	auto *c = static_cast<Client *>(args);
-	if (!c) return nullptr;
+	auto *client = static_cast<Client *>(args);
+	if (!client) return nullptr;
 
-	char buffer[8192 - 25];
-	ssize_t n;
-	std::string uuid = gen_random(10);
+	std::vector<char> buffer(8192); // Buffer for incoming data
+	ssize_t bytesRead;
 
-	// Mutex management and client setup
-	CreateClient(c, uuid);
+	std::string uuid = gen_random(10); // Generate a random UUID
+	CreateClient(client, uuid);
 
-	clientMap[c->id] = uuid;
+	clientMap[client->id] = uuid; // Associate client ID with UUID
 
-	// Initialize game client data
-	auto gc = GetGameClient(c->id);
-	gc.client_id = c->id;
+	auto gc = GetGameClient(client->id);
+	gc.client_id = client->id;
 	gc.client_connection = "TCP";
 	gc.connect_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-	UpdateGameClient(c->id, gc);
+	UpdateGameClient(client->id, gc);
 
 	while (true) {
-		memset(buffer, 0, sizeof(buffer));
-		n = recv(c->sock, buffer, sizeof(buffer), 0);
+		// Attempt to receive data
+		bytesRead = recv(client->sock, buffer.data(), buffer.size(), 0);
 
-		// Check if client disconnected
-		if (n == 0) {
-			LOG_INFO << c->name << " disconnected";
-			handleClientDisconnection(c);
-			break;
-		} else if (n < 0) {
-			LOG_ERROR << "Error while receiving message from client: " << c->name;
-			continue;
-		}
+		if (bytesRead > 0) {
+			std::string message(buffer.data(), bytesRead);
+			globalInboundBuffer[client->id] += message;
 
-		// Process received message
-		std::string tempBuffer(buffer);
-		globalInboundBuffer[c->id] += tempBuffer;
+			// Process complete messages
+			if (boost::algorithm::ends_with(globalInboundBuffer[client->id], "\n")) {
+				auto messages = Utility::explode("\n", globalInboundBuffer[client->id]);
+				globalInboundBuffer[client->id].clear();
 
-		if (!boost::algorithm::ends_with(globalInboundBuffer[c->id], "\n")) {
-			continue;
-		}
-
-		auto messages = Utility::explode("\n", globalInboundBuffer[c->id]);
-		globalInboundBuffer[c->id].clear();
-
-		for (auto &message: messages) {
-			boost::trim(message);
-			if (message.empty()) continue;
-
-			if (message.find("KEEPALIVE") != std::string::npos) {
-				// Handle KEEPALIVE message
-				continue;
+				for (const auto &msg: messages) {
+					if (msg.empty()) continue;
+					processClientMessage(client, msg);
+				}
 			}
-
-			processClientMessage(c, message);
+		} else if (bytesRead == 0) {
+			// Client disconnected
+			LOG_INFO << client->name << " disconnected.";
+			handleClientDisconnection(client);
+			break;
+		} else {
+			// Error handling
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				// No data available, continue
+				continue;
+			} else {
+				LOG_ERROR << "Error receiving data from client " << client->name << ": " << strerror(errno);
+				handleClientDisconnection(client);
+				break;
+			}
 		}
 	}
+
 	return nullptr;
 }
 
@@ -443,7 +439,7 @@ void UdpDiscoveryThread(short port, bool enabled, std::string manikin_id) {
 }
 
 int main(int argc, const char *argv[]) {
-	static plog::ColorConsoleAppender <plog::TxtFormatter> consoleAppender;
+	static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
 	plog::init(plog::verbose, &consoleAppender);
 
 	short discoveryPort = 8888;
