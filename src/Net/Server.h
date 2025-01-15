@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
+#include <fcntl.h>
 
 #include "amm/BaseLogger.h"
 
@@ -20,21 +21,29 @@ public:
 
 	// Core server operations
 	void AcceptAndDispatch();
-	static void* HandleClient(void* args);
+
+	static void *HandleClient(void *args);
 
 	// Client operations
-	static void SendToAll(const std::string& message);
-	static void SendToClient(Client* client, const std::string& message);
-	static Client* GetClientByIndex(const std::string& id);
-	static int FindClientIndex(Client* client);
-	static void RemoveClient(Client* client);
+	static void SendToAll(const std::string &message);
+
+	static void SendToClient(Client *client, const std::string &message);
+
+	static void sendLargeMessage(int sockfd, const std::string &message, size_t chunkSize = 1024);
+
+	static Client *GetClientByIndex(const std::string &id);
+
+	static int FindClientIndex(Client *client);
+
+	static void RemoveClient(Client *client);
 
 	static std::mutex clientsMutex;
 
 private:
 	// Utility and internal operations
 	static void ListClients();
-	static void SendToAll(char* message);
+
+	static void SendToAll(char *message);
 
 	// Member variables
 	int serverSock;
@@ -44,5 +53,8 @@ private:
 	// Static shared resources
 	static std::vector<Client> clients;
 
-	static void CreateClient(Client *c, string &uuid);
+	static void CreateClient(Client *c, std::string &uuid);
+
+	void setNonBlocking(int sockfd);
+
 };
