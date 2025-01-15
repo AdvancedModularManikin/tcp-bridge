@@ -322,7 +322,7 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 
 // Handler for "KEEPALIVE" messages - do nothing but log it for monitoring purposes
 void handleKeepAliveMessage(Client *c) {
-	LOG_TRACE << "Received KEEPALIVE from client " << c->id;
+	// LOG_TRACE << "Received KEEPALIVE from client " << c->id;
 }
 
 void processClientMessage(Client *c, const std::string &message) {
@@ -355,7 +355,7 @@ void processClientMessage(Client *c, const std::string &message) {
 		} else {
 			LOG_ERROR << "Malformed generic topic message from client " << c->id << ": " << message;
 		}
-	} else if (message.find("Module Connected") == 0) {
+	} else if (message.find(" Connected") == 0) {
 		// Module connected message, ignore
 	} else {
 		// Log an unknown or unsupported message type

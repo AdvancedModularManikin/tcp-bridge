@@ -15,7 +15,7 @@ Manikin::Manikin(const std::string &mid, bool pm, std::string pid) {
 		LOG_INFO << "\tCurrently in POD/TPMS mode.";
 	}
 	//	mgr = new DDSManager<Manikin>(config_file, manikin_id);
-	mgr = std::make_unique < DDSManager < Manikin >> (config_file, manikin_id);
+	mgr = std::make_unique<DDSManager<Manikin >>(config_file, manikin_id);
 
 	mgr->InitializeCommand();
 	mgr->InitializeInstrumentData();
@@ -165,11 +165,11 @@ void Manikin::onNewStatus(AMM::Status &st, SampleInfo_t *info) {
 
 	LOG_TRACE << " Sending status message to clients: " << messageOut.str();
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
+	std::lock_guard<std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
+		std::vector<std::string> subV = subscribedTopics[cid];
 
 		if (std::find(subV.begin(), subV.end(), "AMM_Status") != subV.end()) {
 			Client *c = Server::GetClientByIndex(cid);
@@ -185,7 +185,7 @@ void Manikin::onNewStatus(AMM::Status &st, SampleInfo_t *info) {
 void Manikin::onNewModuleConfiguration(AMM::ModuleConfiguration &mc, SampleInfo_t *info) {
 	LOG_DEBUG << "Received module config from manikin " << manikin_id << " for " << mc.name();
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
+	std::lock_guard<std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
@@ -213,12 +213,12 @@ void Manikin::onNewModuleConfiguration(AMM::ModuleConfiguration &mc, SampleInfo_
 /// Event handler for incoming Physiology Waveform data.
 void Manikin::onNewPhysiologyWaveform(AMM::PhysiologyWaveform &n, SampleInfo_t *info) {
 	std::string hfname = "HF_" + n.name();
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
+	std::lock_guard<std::mutex> lock(Server::clientsMutex);
 
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
+		std::vector<std::string> subV = subscribedTopics[cid];
 		if (std::find(subV.begin(), subV.end(), hfname) != subV.end()) {
 			Client *c = Server::GetClientByIndex(cid);
 			if (c) {
@@ -245,11 +245,11 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
 		}
 	}
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
+	std::lock_guard<std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
+		std::vector<std::string> subV = subscribedTopics[cid];
 
 		if (std::find(subV.begin(), subV.end(), n.name()) != subV.end()) {
 			Client *c = Server::GetClientByIndex(cid);
@@ -292,11 +292,11 @@ void Manikin::onNewPhysiologyModification(AMM::PhysiologyModification &pm, Sampl
 
 	LOG_DEBUG << "Received a phys mod via DDS, republishing to TCP clients: " << stringOut;
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
+	std::lock_guard<std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
+		std::vector<std::string> subV = subscribedTopics[cid];
 
 		if (std::find(subV.begin(), subV.end(), pm.type()) != subV.end() ||
 		    std::find(subV.begin(), subV.end(), "AMM_Physiology_Modification") !=
@@ -349,11 +349,11 @@ void Manikin::onNewOmittedEvent(AMM::OmittedEvent &oe, SampleInfo_t *info) {
 	string stringOut = messageOut.str();
 
 	LOG_DEBUG << "Received an EventRecord via DDS, republishing to TCP clients: " << stringOut;
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
+	std::lock_guard<std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
+		std::vector<std::string> subV = subscribedTopics[cid];
 		if (std::find(subV.begin(), subV.end(), "AMM_EventRecord") != subV.end()) {
 			Client *c = Server::GetClientByIndex(cid);
 			if (c) {
@@ -395,11 +395,11 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
 
 	LOG_DEBUG << "Received an EventRecord via DDS, republishing to TCP clients: " << stringOut;
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
+	std::lock_guard<std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
+		std::vector<std::string> subV = subscribedTopics[cid];
 		if (std::find(subV.begin(), subV.end(), "AMM_EventRecord") != subV.end()) {
 			Client *c = Server::GetClientByIndex(cid);
 			if (c) {
@@ -439,11 +439,11 @@ void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo
 
 	LOG_DEBUG << "Received an assessment via DDS, republishing to TCP clients: " << stringOut;
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
+	std::lock_guard<std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
+		std::vector<std::string> subV = subscribedTopics[cid];
 		if (std::find(subV.begin(), subV.end(), "AMM_Assessment") != subV.end()) {
 			Client *c = Server::GetClientByIndex(cid);
 			if (c) {
@@ -496,7 +496,7 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 
 	if (rendModPayload.find("CHOSE_ROLE") != std::string::npos) {
 		LOG_INFO << "Role chooser, break up participant: " << practitioner;
-		std::vector <std::string> participant_data = split(practitioner, ':');
+		std::vector<std::string> participant_data = split(practitioner, ':');
 		const std::string &pid = participant_data[1];
 		ConnectionData gc = GetGameClient(pid);
 		const auto p1 = std::chrono::system_clock::now();
@@ -521,11 +521,11 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 		mgr->WriteCommand(cmdInstance);
 	}
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
+	std::lock_guard<std::mutex> lock(Server::clientsMutex);
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
 		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
+		std::vector<std::string> subV = subscribedTopics[cid];
 		if (std::find(subV.begin(), subV.end(), rendMod.type()) != subV.end() ||
 		    std::find(subV.begin(), subV.end(), "AMM_Render_Modification") !=
 		    subV.end()) {
@@ -605,7 +605,7 @@ void Manikin::onNewOperationalDescription(AMM::OperationalDescription &opD, Samp
 	           << std::endl;
 	string stringOut = messageOut.str();
 
-	LOG_DEBUG << "Received an Operational Description via DDS, republishing to TCP clients: " << stringOut;
+	// LOG_DEBUG << "Received an Operational Description via DDS, republishing to TCP clients: " << stringOut;
 
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
@@ -810,21 +810,21 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 		} else if (value.find("ENABLE_REMOTE") != std::string::npos) {
 			std::string remoteData = value.substr(sizeof("ENABLE_REMOTE"));
 			LOG_INFO << "Enabling remote with options:" << remoteData;
-			std::list <std::string> tokenList;
+			std::list<std::string> tokenList;
 			split(tokenList, remoteData, boost::algorithm::is_any_of(";"), boost::token_compress_on);
-			std::map <std::string, std::string> kvp;
+			std::map<std::string, std::string> kvp;
 
 			BOOST_FOREACH(std::string
-			token, tokenList) {
-				size_t sep_pos = token.find_first_of('=');
-				std::string kvp_key = token.substr(0, sep_pos);
-				boost::algorithm::to_lower(kvp_key);
-				std::string kvp_value = (sep_pos == std::string::npos ? "" : token.substr(
-						sep_pos + 1,
-						std::string::npos));
-				kvp[kvp_key] = kvp_value;
-				LOG_DEBUG << "\t" << kvp_key << " => " << kvp[kvp_key];
-			}
+					              token, tokenList) {
+							size_t sep_pos = token.find_first_of('=');
+							std::string kvp_key = token.substr(0, sep_pos);
+							boost::algorithm::to_lower(kvp_key);
+							std::string kvp_value = (sep_pos == std::string::npos ? "" : token.substr(
+									sep_pos + 1,
+									std::string::npos));
+							kvp[kvp_key] = kvp_value;
+							LOG_DEBUG << "\t" << kvp_key << " => " << kvp[kvp_key];
+						}
 
 			if (kvp.find("password") != kvp.end()) {
 				SESSION_PASSWORD = kvp["password"];
@@ -857,21 +857,21 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 		} else if (value.find("UPDATE_CLIENT") != std::string::npos) {
 			std::string clientData = value.substr(sizeof("UPDATE_CLIENT"));
 			LOG_DEBUG << "Updating client with client data:" << clientData;
-			std::list <std::string> tokenList;
+			std::list<std::string> tokenList;
 			split(tokenList, clientData, boost::algorithm::is_any_of(";"), boost::token_compress_on);
-			std::map <std::string, std::string> kvp;
+			std::map<std::string, std::string> kvp;
 
 			BOOST_FOREACH(std::string
-			token, tokenList) {
-				size_t sep_pos = token.find_first_of('=');
-				std::string kvp_key = token.substr(0, sep_pos);
-				boost::algorithm::to_lower(kvp_key);
-				std::string kvp_value = (sep_pos == std::string::npos ? "" : token.substr(
-						sep_pos + 1,
-						std::string::npos));
-				kvp[kvp_key] = value;
-				LOG_TRACE << "\t" << kvp_key << " => " << kvp[kvp_key];
-			}
+					              token, tokenList) {
+							size_t sep_pos = token.find_first_of('=');
+							std::string kvp_key = token.substr(0, sep_pos);
+							boost::algorithm::to_lower(kvp_key);
+							std::string kvp_value = (sep_pos == std::string::npos ? "" : token.substr(
+									sep_pos + 1,
+									std::string::npos));
+							kvp[kvp_key] = value;
+							LOG_TRACE << "\t" << kvp_key << " => " << kvp[kvp_key];
+						}
 
 			std::string client_id;
 			if (kvp.find("client_id") != kvp.end()) {
@@ -1039,7 +1039,7 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 	// Set the client's type
 	c->SetClientType(nodeName);
 
-	std::lock_guard <std::mutex> lock(m_mapmutex);
+	std::lock_guard<std::mutex> lock(m_mapmutex);
 	try {
 		clientTypeMap.insert({c->id, nodeName});
 	} catch (exception &e) {
@@ -1091,7 +1091,7 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 							subTopicName = subNodePath;
 						}
 					}
-					std::lock_guard <std::mutex> lock(m_topicmutex);
+					std::lock_guard<std::mutex> lock(m_topicmutex);
 					Utility::add_once(subscribedTopics[c->id], subTopicName);
 					LOG_TRACE << "[" << capabilityName << "][" << c->id << "] Subscribing to " << subTopicName;
 				}
@@ -1106,7 +1106,7 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 				     pub; pub = pub->NextSibling()) {
 					tinyxml2::XMLElement *p = pub->ToElement();
 					std::string pubTopicName = p->Attribute("name");
-					std::lock_guard <std::mutex> lock(m_topicmutex);
+					std::lock_guard<std::mutex> lock(m_topicmutex);
 					Utility::add_once(publishedTopics[c->id], pubTopicName);
 					LOG_TRACE << "[" << capabilityName << "][" << c->id << "] Publishing " << pubTopicName;
 				}
