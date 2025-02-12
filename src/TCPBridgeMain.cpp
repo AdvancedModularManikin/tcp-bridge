@@ -1,28 +1,21 @@
-
 #include "Net/Client.h"
 #include "Net/Server.h"
 #include "Net/UdpDiscoveryServer.h"
 
 #include "amm_std.h"
-
 #include "amm/BaseLogger.h"
-
 #include "bridge.h"
-
 #include "TPMS.h"
-
 #include "tinyxml2.h"
-
 
 using namespace std;
 using namespace tinyxml2;
 using namespace AMM;
-using namespace std;
 using namespace std::chrono;
 using namespace eprosima::fastdds::dds;
 using namespace eprosima::fastrtps::rtps;
 
-Server *s;
+std::unique_ptr<Server> s;
 
 std::map<std::string, std::string> clientMap;
 std::map<std::string, std::string> clientTypeMap;
@@ -55,11 +48,9 @@ const string sysPrefix = "[SYS]";
 const string actPrefix = "[ACT]";
 const string loadPrefix = "LOAD_STATE:";
 
-std::mutex Server::clientsMutex;
-
 TPMS pod;
 
-std::string ExtractManikinIDFromString(std::string in) {
+std::string ExtractManikinIDFromString(const std::string& in) {
 	std::size_t pos = in.find("mid=");
 	if (pos != std::string::npos) {
 		std::string mid1 = in.substr(pos + 4);
@@ -73,8 +64,7 @@ std::string ExtractManikinIDFromString(std::string in) {
 	return DEFAULT_MANIKIN_ID;
 }
 
-
-void broadcastDisconnection(const ConnectionData &gc) {
+void broadcastDisconnection(const ConnectionData& gc) {
 	std::ostringstream message;
 	message << "[SYS]UPDATE_CLIENT=";
 	message << "client_id=" << gc.client_id << ";client_name=" << gc.client_name;
@@ -92,46 +82,47 @@ void broadcastDisconnection(const ConnectionData &gc) {
 	}
 }
 
-void handleClientDisconnection(Client *c) {
+void handleClientDisconnection(const std::shared_ptr<Client>& c) {
+	std::string clientId(c->GetId());
+
 	// Update game client status to DISCONNECTED
-	ConnectionData gc = GetGameClient(c->id);
+	ConnectionData gc = GetGameClient(clientId);
 	gc.client_status = "DISCONNECTED";
-	UpdateGameClient(c->id, gc);
+	UpdateGameClient(clientId, gc);
 	broadcastDisconnection(gc);
 
-	std::lock_guard<std::mutex> lock(Server::clientsMutex);
-	clientMap.erase(c->id);
-
+	std::lock_guard<std::mutex> lock(Server::GetClientsMutex());
+	clientMap.erase(clientId);
 	Server::RemoveClient(c);
 }
 
-// Handler for client registration
-void handleRegisterMessage(Client *c, const std::string &message) {
+void handleRegisterMessage(const std::shared_ptr<Client>& c, const std::string& message) {
+	std::string clientId(c->GetId());
 	std::string registerVal = message.substr(registerPrefix.size());
-	LOG_INFO << "Client " << c->id << " registered name: " << registerVal;
+	LOG_INFO << "Client " << clientId << " registered name: " << registerVal;
 
 	// Parse client registration data
 	auto parts = split(registerVal, ';');
 	if (parts.size() >= 2) {
-		auto gc = GetGameClient(c->id);
+		auto gc = GetGameClient(clientId);
 		gc.client_name = parts[0];
 		gc.learner_name = parts[1];
 		gc.client_status = "CONNECTED";
-		UpdateGameClient(c->id, gc);
+		UpdateGameClient(clientId, gc);
 	} else {
 		LOG_WARNING << "Malformed registration message: " << registerVal;
 	}
 
 	// Notify all clients of new registration
 	std::ostringstream joinMessage;
-	joinMessage << "CLIENT_JOINED=" << c->id << std::endl;
+	joinMessage << "CLIENT_JOINED=" << clientId << std::endl;
 	Server::SendToAll(joinMessage.str());
 }
 
-// Handler for kicking a client
-void handleKickMessage(Client *c, const std::string &message) {
+void handleKickMessage(const std::shared_ptr<Client>& c, const std::string& message) {
+	std::string clientId(c->GetId());
 	std::string kickId = message.substr(kickPrefix.size());
-	LOG_INFO << "Client " << c->id << " requested kick of client ID: " << kickId;
+	LOG_INFO << "Client " << clientId << " requested kick of client ID: " << kickId;
 
 	auto it = gameClientList.find(kickId);
 	if (it != gameClientList.end()) {
@@ -148,129 +139,114 @@ void handleKickMessage(Client *c, const std::string &message) {
 	if (tmgr) tmgr->mgr->WriteCommand(cmdInstance);
 }
 
-// Handler for setting client status
-void handleStatusMessage(Client *c, const std::string &message) {
+void handleStatusMessage(const std::shared_ptr<Client>& c, const std::string& message) {
+	std::string clientId(c->GetId());
 	std::string encodedStatus = message.substr(statusPrefix.size());
 	std::string status;
 	try {
 		status = Utility::decode64(encodedStatus);
-	} catch (std::exception &e) {
+	} catch (const std::exception& e) {
 		LOG_ERROR << "Error decoding base64 status message: " << e.what();
 		return;
 	}
 
-	LOG_DEBUG << "Client " << c->id << " set status: " << status;
+	LOG_DEBUG << "Client " << clientId << " set status: " << status;
 	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
 	if (tmgr) tmgr->HandleStatus(c, status);
 }
 
-// Handler for client capabilities announcement
-void handleCapabilityMessage(Client *c, const std::string &message) {
+void handleCapabilityMessage(const std::shared_ptr<Client>& c, const std::string& message) {
+	std::string clientId(c->GetId());
 	std::string encodedCapabilities = message.substr(capabilityPrefix.size());
 	std::string capabilities;
 	std::ostringstream ack;
 
 	try {
-		// Decode the entire Base64 string
 		capabilities = Utility::decode64(encodedCapabilities);
-
-		LOG_INFO << "Client " << c->id << " sent capabilities.";
-		// LOG_DEBUG << "Decoded capabilities: " << capabilities;
+		LOG_INFO << "Client " << clientId << " sent capabilities.";
 
 		auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
 		if (tmgr) {
 			tmgr->HandleCapabilities(c, capabilities);
 		}
 
-		// Send acknowledgment
-		ack << "CAPABILITIES_RECEIVED=" << c->id << std::endl;
+		ack << "CAPABILITIES_RECEIVED=" << clientId << std::endl;
 		Server::SendToClient(c, ack.str());
-	} catch (std::exception &e) {
+	} catch (const std::exception& e) {
 		LOG_ERROR << "Error decoding Base64 capabilities: " << e.what();
-		ack << "ERROR_IN_CAPABILITIES_RECEIVED=" << c->id << std::endl;
+		ack << "ERROR_IN_CAPABILITIES_RECEIVED=" << clientId << std::endl;
 		Server::SendToClient(c, ack.str());
 	}
 }
 
-
-// Handler for client settings message
-void handleSettingsMessage(Client *c, const std::string &message) {
+void handleSettingsMessage(const std::shared_ptr<Client>& c, const std::string& message) {
+	std::string clientId(c->GetId());
 	std::string encodedSettings = message.substr(settingsPrefix.size());
 	std::string settings;
 	try {
 		settings = Utility::decode64(encodedSettings);
-	} catch (std::exception &e) {
+	} catch (const std::exception& e) {
 		LOG_ERROR << "Error decoding base64 settings: " << e.what();
 		return;
 	}
 
-	LOG_INFO << "Client " << c->id << " sent settings: " << settings;
+	LOG_INFO << "Client " << clientId << " sent settings: " << settings;
 	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
 	if (tmgr) tmgr->HandleSettings(c, settings);
 }
 
-// Handler for client requests
-void handleRequestMessage(Client *c, const std::string &message) {
+void handleRequestMessage(const std::shared_ptr<Client>& c, const std::string& message) {
+	std::string clientId(c->GetId());
 	std::string request = message.substr(requestPrefix.size());
-	LOG_INFO << "Client " << c->id << " sent request: " << request;
+	LOG_INFO << "Client " << clientId << " sent request: " << request;
 	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
 	if (tmgr) tmgr->DispatchRequest(c, request);
 }
 
-// Handler for client actions
-void handleActionMessage(Client *c, const std::string &message) {
+void handleActionMessage(const std::shared_ptr<Client>& c, const std::string& message) {
+	std::string clientId(c->GetId());
 	std::string action = message.substr(actionPrefix.size());
-	LOG_INFO << "Client " << c->id << " sent action: " << action;
+	LOG_INFO << "Client " << clientId << " sent action: " << action;
 
-	// Broadcast action as an AMM Command
 	AMM::Command cmdInstance;
 	cmdInstance.message(action);
 	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
 	if (tmgr) tmgr->mgr->WriteCommand(cmdInstance);
 }
 
-void parseKeyValuePairs(const std::string &message, std::map<std::string, std::string> &kvp) {
-	// Split the message into tokens based on semicolons
+void handleKeepAliveMessage(const std::shared_ptr<Client>& c) {
+	// LOG_TRACE << "Received KEEPALIVE from client " << std::string(c->GetId());
+}
+
+void parseKeyValuePairs(const std::string& message, std::map<std::string, std::string>& kvp) {
 	std::vector<std::string> tokens;
 	boost::split(tokens, message, boost::is_any_of(";"), boost::token_compress_on);
 
-	// Process each token to extract key-value pairs
-	for (const auto &token: tokens) {
+	for (const auto& token : tokens) {
 		size_t sep_pos = token.find('=');
 		if (sep_pos != std::string::npos) {
 			std::string key = token.substr(0, sep_pos);
 			std::string value = token.substr(sep_pos + 1);
 
-			// Trim whitespace and convert key to lowercase for consistency
 			boost::trim(key);
 			boost::trim(value);
 			boost::to_lower(key);
 
-			kvp[key] = value; // Insert into map
+			kvp[key] = value;
 		} else {
-			// Log a warning if the token is malformed
 			LOG_WARNING << "Malformed token in message: " << token;
-			std::string key = token.substr(0, sep_pos);
-			std::string value = token.substr(sep_pos + 1);
-
-			// Trim whitespace and convert key to lowercase for consistency
-			boost::trim(key);
-			boost::trim(value);
-			boost::to_lower(key);
 		}
 	}
 }
 
-
-// Handler for physiological and render modifications
-void handleModificationMessage(Client *c, const std::string &message, const std::string &topic) {
+void handleModificationMessage(const std::shared_ptr<Client>& c, const std::string& message, const std::string& topic) {
+	std::string clientId(c->GetId());
 	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
 	if (!tmgr) {
 		LOG_ERROR << "No manikin manager available for modification message.";
 		return;
 	}
 
-	// Command's don't need to be extracted
 	if (topic == "AMM_Command") {
 		LOG_INFO << "Sending command: " << message;
 		return tmgr->SendCommand(message);
@@ -289,7 +265,6 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	agentID.id(kvp["participant_id"]);
 
 	std::string modType = kvp["type"];
-
 	std::string modPayload = kvp["payload"];
 
 	if (modType.empty()) {
@@ -298,7 +273,7 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 
 	if (topic == "AMM_Render_Modification") {
 		tmgr->SendEventRecord(erID, fma, agentID, modType);
-		if (modPayload.empty()) { // make a render mod payload
+		if (modPayload.empty()) {
 			std::ostringstream tPayload;
 			tPayload << "<RenderModification type='" << modType << "'/>";
 			tmgr->SendRenderModification(erID, modType, tPayload.str());
@@ -320,13 +295,9 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	}
 }
 
-// Handler for "KEEPALIVE" messages - do nothing but log it for monitoring purposes
-void handleKeepAliveMessage(Client *c) {
-	// LOG_TRACE << "Received KEEPALIVE from client " << c->id;
-}
+void processClientMessage(const std::shared_ptr<Client>& c, const std::string& message) {
+	std::string clientId(c->GetId());
 
-void processClientMessage(Client *c, const std::string &message) {
-	// Log and route the message based on its prefix/type
 	if (message.find(keepAlivePrefix) == 0) {
 		handleKeepAliveMessage(c);
 	} else if (message.find(registerPrefix) == 0) {
@@ -344,7 +315,6 @@ void processClientMessage(Client *c, const std::string &message) {
 	} else if (message.find(actionPrefix) == 0) {
 		handleActionMessage(c, message);
 	} else if (message.find(genericTopicPrefix) == 0) {
-		// Parse the topic and message content for modification-type messages
 		int firstBracket = message.find('[');
 		int lastBracket = message.find(']');
 
@@ -353,145 +323,21 @@ void processClientMessage(Client *c, const std::string &message) {
 			std::string content = message.substr(lastBracket + 1);
 			handleModificationMessage(c, content, topic);
 		} else {
-			LOG_ERROR << "Malformed generic topic message from client " << c->id << ": " << message;
+			LOG_ERROR << "Malformed generic topic message from client " << clientId << ": " << message;
 		}
 	} else if (message.find(" Connected") == 0) {
 		// Module connected message, ignore
 	} else {
-		// Log an unknown or unsupported message type
-		LOG_ERROR << "Unknown or unsupported message from client " << c->id << ": " << message;
+		LOG_ERROR << "Unknown or unsupported message from client " << clientId << ": " << message;
 	}
 }
 
-void *Server::HandleClient(void *args) {
-	auto *client = static_cast<Client *>(args);
-	if (!client) return nullptr;
-
-	std::vector<char> buffer(8192); // Buffer for incoming data
-	ssize_t bytesRead;
-
-	std::string uuid = gen_random(10); // Generate a random UUID
-	CreateClient(client, uuid);
-
-	clientMap[client->id] = uuid;
-
-	auto gc = GetGameClient(client->id);
-	gc.client_id = client->id;
-	gc.client_connection = "TCP";
-	gc.connect_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-	UpdateGameClient(client->id, gc);
-
-	std::string messageBuffer; // Buffer for accumulating data
-
-	while (true) {
-		// Attempt to receive data
-		bytesRead = recv(client->sock, buffer.data(), buffer.size(), 0);
-
-		if (bytesRead > 0) {
-			messageBuffer.append(buffer.data(), bytesRead); // Append data to the buffer
-
-			// Process complete messages
-			size_t pos;
-			while ((pos = messageBuffer.find('\n')) != std::string::npos) {
-				std::string message = messageBuffer.substr(0, pos);
-				messageBuffer.erase(0, pos + 1); // Remove processed message
-				boost::trim(message);
-
-				if (!message.empty()) {
-					processClientMessage(client, message);
-				}
-			}
-		} else if (bytesRead == 0) {
-			// Client disconnected
-			LOG_INFO << client->name << " disconnected.";
-			handleClientDisconnection(client);
-			break;
-		} else {
-			// Error handling
-			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				continue; // No data available, keep going
-			} else {
-				LOG_ERROR << "Error receiving data from client " << client->name << ": " << strerror(errno);
-				handleClientDisconnection(client);
-				break;
-			}
-		}
-	}
-
-	return nullptr;
-}
-
-/*void *Server::HandleClient(void *args) {
-	auto *client = static_cast<Client *>(args);
-	if (!client) return nullptr;
-
-	std::vector<char> buffer(8192); // Buffer for incoming data
-	ssize_t bytesRead;
-
-	std::string uuid = gen_random(10); // Generate a random UUID
-	CreateClient(client, uuid);
-
-	clientMap[client->id] = uuid; // Associate client ID with UUID
-
-	auto gc = GetGameClient(client->id);
-	gc.client_id = client->id;
-	gc.client_connection = "TCP";
-	gc.connect_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-	UpdateGameClient(client->id, gc);
-
-	while (true) {
-		// Attempt to receive data
-		bytesRead = recv(client->sock, buffer.data(), buffer.size(), 0);
-
-		if (bytesRead > 0) {
-			std::string message(buffer.data(), bytesRead);
-			globalInboundBuffer[client->id] += message;
-
-			// Process complete messages
-			if (boost::algorithm::ends_with(globalInboundBuffer[client->id], "\n")) {
-				auto messages = Utility::explode("\n", globalInboundBuffer[client->id]);
-				globalInboundBuffer[client->id].clear();
-
-				for (const auto &msg: messages) {
-					if (msg.empty()) continue;
-					processClientMessage(client, msg);
-				}
-			}
-		} else if (bytesRead == 0) {
-			// Client disconnected
-			LOG_INFO << client->name << " disconnected.";
-			handleClientDisconnection(client);
-			break;
-		} else {
-			// Error handling
-			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				// No data available, continue
-				continue;
-			} else {
-				LOG_ERROR << "Error receiving data from client " << client->name << ": " << strerror(errno);
-				handleClientDisconnection(client);
-				break;
-			}
-		}
-	}
-
-	return nullptr;
-}*/
-
-void Server::CreateClient(Client *c, string &uuid) {
-	std::lock_guard<std::mutex> lock(clientsMutex);
-	c->SetId(uuid);
-	string defaultName = "Client " + c->id;
-	c->SetName(defaultName);
-	clients.push_back(*c);
-	LOG_DEBUG << "Adding client with id: " << c->id;
-}
 
 
 void UdpDiscoveryThread(short port, bool enabled, std::string manikin_id) {
 	if (enabled) {
 		boost::asio::io_service io_service;
-		UdpDiscoveryServer udps(io_service, port, manikin_id);
+		UdpDiscoveryServer udps(io_service, port, std::move(manikin_id));
 		LOG_INFO << "UDP Discovery listening on port " << port;
 		io_service.run();
 	} else {
@@ -499,7 +345,7 @@ void UdpDiscoveryThread(short port, bool enabled, std::string manikin_id) {
 	}
 }
 
-int main(int argc, const char *argv[]) {
+int main(int argc, const char* argv[]) {
 	static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
 	plog::init(plog::verbose, &consoleAppender);
 
@@ -525,55 +371,56 @@ int main(int argc, const char *argv[]) {
 			("manikins", po::value(&manikinCount)->default_value(1))
 			("core_id", po::value(&coreId)->default_value("AMM_000"), "Core ID");
 
-
-	// This isn't set to enforce it, but there are two modes of operation
-	//  POD mode, which will register 1-3 manikins and act as the instructor bridge
-	//  Manikin mod, which will register as a single manikin and act as the standard TCP bridge
-
-
-	// TWo example run commands:
-	// ./amm_tcp_bridge -dp=8889 -sp=9016 -pod_mode=true manikins=4
-	//      Will launch in pod mode with 4 manikins
-	//
-	// ./amm_tcp_bridge -dp=8888 -sp=9015 -pod_mode=false manikin_id=manikin_2
-	//      Will launch in manikin mode with a single manikin using profile manikin_2
-
-	// parse arguments and save them in the variable map (vm)
-	po::store(po::parse_command_line(argc, argv, desc), vm);
-	po::notify(vm);
-
-	// Check if there are enough args or if --help is given
-	if (vm.count("help")) {
-		std::cerr << desc << "\n";
-		return 1;
-	}
-
-	DEFAULT_MANIKIN_ID = manikinId;
-	CORE_ID = coreId;
-
-	LOG_INFO << "=== [AMM - TCP Bridge] ===";
 	try {
-		pod.SetID(manikinId);
-		pod.SetMode(podMode);
-		if (podMode) {
-			pod.InitializeManikins(manikinCount);
-		} else {
-			pod.InitializeManikin(manikinId);
+		po::store(po::parse_command_line(argc, argv, desc), vm);
+		po::notify(vm);
+
+		if (vm.count("help")) {
+			std::cerr << desc << "\n";
+			return 1;
 		}
 
-	} catch (exception &e) {
-		LOG_ERROR << "Unable to initialize manikins in POD: " << e.what();
+		DEFAULT_MANIKIN_ID = manikinId;
+		CORE_ID = coreId;
+
+		LOG_INFO << "=== [AMM - TCP Bridge] ===";
+
+		try {
+			pod.SetID(manikinId);
+			pod.SetMode(podMode);
+			if (podMode) {
+				pod.InitializeManikins(manikinCount);
+			} else {
+				pod.InitializeManikin(manikinId);
+			}
+		} catch (const std::exception& e) {
+			LOG_ERROR << "Unable to initialize manikins in POD: " << e.what();
+			return 1;
+		}
+
+		// Start UDP discovery in a separate thread
+		std::thread discoveryThread(UdpDiscoveryThread, discoveryPort, discovery, manikinId);
+
+		// Create and start the TCP server
+		try {
+			s = std::make_unique<Server>(bridgePort);
+			LOG_INFO << "TCP Bridge listening on port " << bridgePort;
+			s->AcceptAndDispatch();
+		} catch (const std::exception& e) {
+			LOG_ERROR << "Server error: " << e.what();
+			return 1;
+		}
+
+		// Wait for discovery thread to finish
+		if (discoveryThread.joinable()) {
+			discoveryThread.join();
+		}
+
+		LOG_INFO << "TCP Bridge shutdown.";
+		return 0;
+
+	} catch (const std::exception& e) {
+		LOG_ERROR << "Error: " << e.what();
+		return 1;
 	}
-
-	std::thread t1(UdpDiscoveryThread, discoveryPort, discovery, manikinId);
-	s = new Server(bridgePort);
-	std::string action;
-
-	LOG_INFO << "TCP Bridge listening on port " << bridgePort;
-
-	s->AcceptAndDispatch();
-
-	t1.join();
-
-	LOG_INFO << "TCP Bridge shutdown.";
 }

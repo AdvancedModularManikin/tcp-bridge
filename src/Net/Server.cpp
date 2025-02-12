@@ -1,155 +1,227 @@
 #include "Server.h"
 
-// Static members
-std::vector<Client> Server::clients;
+// Static member initialization
+std::vector<std::shared_ptr<Client>> Server::clients;
+std::mutex Server::clientsMutex;
 
-// Constructor
-Server::Server(int port) {
+Server::Server(int port) : m_runThread(true), serverSock(-1) {
 	int yes = 1;
-	m_runThread = true;
 
-	// Initialize the server socket
-	serverSock = socket(AF_INET, SOCK_STREAM, 0);
-	if (serverSock < 0) {
-		throw std::runtime_error("Failed to create socket");
+	try {
+		// Initialize the server socket
+		serverSock = socket(AF_INET, SOCK_STREAM, 0);
+		if (serverSock < 0) {
+			throw std::runtime_error("Failed to create socket: " + std::string(strerror(errno)));
+		}
+
+		// Configure the server address
+		memset(&serverAddr, 0, sizeof(sockaddr_in));
+		serverAddr.sin_family = AF_INET;
+		serverAddr.sin_addr.s_addr = INADDR_ANY;
+		serverAddr.sin_port = htons(port);
+
+		// Set socket options
+		if (setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) < 0) {
+			throw std::runtime_error("Failed to set SO_REUSEADDR: " + std::string(strerror(errno)));
+		}
+
+		if (setsockopt(serverSock, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(int)) < 0) {
+			throw std::runtime_error("Failed to set TCP_NODELAY: " + std::string(strerror(errno)));
+		}
+
+		// Bind the socket
+		if (bind(serverSock, (struct sockaddr*)&serverAddr, sizeof(sockaddr_in)) < 0) {
+			throw std::runtime_error("Failed to bind socket: " + std::string(strerror(errno)));
+		}
+
+		// Start listening
+		if (listen(serverSock, MAX_LISTEN_BACKLOG) < 0) {
+			throw std::runtime_error("Failed to listen on socket: " + std::string(strerror(errno)));
+		}
+
+		LOG_INFO << "Server initialized on port " << port;
 	}
-
-	// Configure the server address
-	memset(&serverAddr, 0, sizeof(sockaddr_in));
-	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_addr.s_addr = INADDR_ANY;
-	serverAddr.sin_port = htons(port);
-
-	// Set socket options
-	setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
-	setsockopt(serverSock, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int));
-
-	// Bind the socket
-	if (bind(serverSock, (struct sockaddr *) &serverAddr, sizeof(sockaddr_in)) < 0) {
-		throw std::runtime_error("Failed to bind socket");
+	catch (const std::exception& e) {
+		cleanup();
+		throw;
 	}
-
-	// Start listening
-	if (listen(serverSock, 30) < 0) {
-		throw std::runtime_error("Failed to listen on socket");
-	}
-
-	LOG_INFO << "Server initialized on port " << port;
 }
 
-// Accept new connections and dispatch them to threads
+Server::~Server() {
+	cleanup();
+}
+
+void Server::cleanup() {
+	m_runThread = false;
+
+	if (serverSock >= 0) {
+		shutdown(serverSock, SHUT_RDWR);
+		close(serverSock);
+		serverSock = -1;
+	}
+
+	std::lock_guard<std::mutex> lock(threadsMutex);
+	for (auto& thread : clientThreads) {
+		if (thread && thread->IsRunning()) {
+			thread->Join();
+		}
+	}
+	clientThreads.clear();
+}
+
 void Server::AcceptAndDispatch() {
 	socklen_t cliSize = sizeof(sockaddr_in);
 
 	while (m_runThread) {
-		auto *client = new Client();
-		client->sock = accept(serverSock, (struct sockaddr *) &clientAddr, &cliSize);
-		if (client->sock >= 0) {
-			setNonBlocking(client->sock); // Set the client socket to non-blocking
-		}
+		auto client = std::make_shared<Client>();
+		int newSocket = accept(serverSock, (struct sockaddr*)&clientAddr, &cliSize);
 
-		if (client->sock < 0) {
-			LOG_ERROR << "Error on accept: " << strerror(errno);
-			delete client;
+		if (newSocket >= 0) {
+			setNonBlocking(newSocket);
+			try {
+				client->SetSocket(newSocket);
 
-			if (errno == EINTR) {
-				continue; // Retry on interrupt
-			} else {
-				break; // Exit on fatal error
+				auto thread = std::make_unique<ServerThread>();
+				thread->Create([client]() {
+					HandleClient(client);
+				});
+
+				{
+					std::lock_guard<std::mutex> lock(threadsMutex);
+					clientThreads.push_back(std::move(thread));
+
+					// Cleanup finished threads
+					clientThreads.erase(
+							std::remove_if(clientThreads.begin(), clientThreads.end(),
+							               [](const auto& t) { return !t || !t->IsRunning(); }),
+							clientThreads.end()
+					);
+				}
+			}
+			catch (const std::exception& e) {
+				LOG_ERROR << "Failed to handle new client: " << e.what();
+				close(newSocket);
 			}
 		}
-
-		// Handle new client connection
-		try {
-			auto *clientThread = new ServerThread();
-			clientThread->Create((void *) Server::HandleClient, client);
-		} catch (...) {
-			LOG_ERROR << "Failed to create thread for client";
-			close(client->sock);
-			delete client;
+		else if (errno != EINTR) {
+			LOG_ERROR << "Error accepting connection: " << strerror(errno);
+			break;
 		}
 	}
 
-	close(serverSock);
+	cleanup();
 	LOG_INFO << "Server stopped accepting connections.";
 }
 
-// Send a message to all clients
-void Server::SendToAll(const std::string &message) {
-	std::vector<Client> tempClients;
+void Server::HandleClient(const std::shared_ptr<Client>& client) {
+	if (!client) {
+		LOG_ERROR << "Null client passed to HandleClient";
+		return;
+	}
 
-	// Step 1: Copy the clients list while holding the lock
+	std::vector<char> buffer(BUFFER_SIZE);
+	std::string messageBuffer;
+
 	{
 		std::lock_guard<std::mutex> lock(clientsMutex);
-		tempClients = clients; // Copy clients list
+		clients.push_back(client);
 	}
 
-	std::vector<std::string> disconnectedClients;
+	while (true) {
+		ssize_t bytesRead = recv(client->GetSocket(), buffer.data(), buffer.size(), 0);
 
-	// Step 2: Send the message to each client
-	for (auto &client: tempClients) {
-		try {
-			sendLargeMessage(client.sock, message); // Use the sendLargeMessage function
-		} catch (const std::exception &e) {
-			LOG_ERROR << "Error sending to client " << client.id << ": " << e.what();
-			disconnectedClients.push_back(client.id); // Mark client for removal
-		}
-	}
+		if (bytesRead > 0) {
+			messageBuffer.append(buffer.data(), bytesRead);
 
-	// Step 3: Remove disconnected clients while holding the lock
-	if (!disconnectedClients.empty()) {
-		std::lock_guard<std::mutex> lock(clientsMutex);
+			size_t pos;
+			while ((pos = messageBuffer.find('\n')) != std::string::npos) {
+				std::string message = messageBuffer.substr(0, pos);
+				messageBuffer.erase(0, pos + 1);
 
-		for (const auto &id: disconnectedClients) {
-			auto it = std::remove_if(clients.begin(), clients.end(),
-			                         [&id](const Client &c) { return c.id == id; });
-			if (it != clients.end()) {
-				LOG_INFO << "Removing disconnected client: " << id;
-				shutdown(it->sock, SHUT_RDWR);
-				close(it->sock);
-				clients.erase(it);
+				if (!message.empty()) {
+					LOG_DEBUG << "Received message from client " << client->GetId() << ": " << message;
+					// Process message here
+				}
 			}
 		}
+		else if (bytesRead == 0 || (bytesRead < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+			break;
+		}
+	}
+
+	RemoveClient(client);
+}
+
+void Server::SendToAll(const std::string& message) {
+	std::vector<std::shared_ptr<Client>> tempClients;
+
+	{
+		std::lock_guard<std::mutex> lock(clientsMutex);
+		tempClients = clients;
+	}
+
+	for (const auto& client : tempClients) {
+		try {
+			SendToClient(client, message);
+		}
+		catch (const std::exception& e) {
+			LOG_ERROR << "Error broadcasting to client " << client->GetId() << ": " << e.what();
+		}
 	}
 }
 
-// Overloaded version to send a C-string
-void Server::SendToAll(char *message) {
-	SendToAll(std::string(message));
-}
-
-// Send a message to a specific client
-void Server::SendToClient(Client *client, const std::string &message) {
+void Server::SendToClient(const std::shared_ptr<Client>& client, const std::string& message) {
 	if (!client) {
 		LOG_WARNING << "Attempted to send to a null client.";
 		return;
 	}
 
 	try {
-		sendLargeMessage(client->sock, message); // Use the sendLargeMessage function
-	} catch (const std::exception &e) {
-		LOG_ERROR << "Error sending to client " << client->id << ": " << e.what();
-
-		// Handle client disconnection
-		{
-			std::lock_guard<std::mutex> lock(clientsMutex);
-
-			// Find the client in the list and remove it
-			auto it = std::remove_if(clients.begin(), clients.end(),
-			                         [&client](const Client &c) { return c.id == client->id; });
-			if (it != clients.end()) {
-				LOG_INFO << "Removing disconnected client: " << client->id;
-				shutdown(client->sock, SHUT_RDWR);
-				close(client->sock);
-				clients.erase(it);
-			} else {
-				LOG_WARNING << "Client not found for removal: " << client->id;
-			}
-		}
+		sendLargeMessage(client->GetSocket(), message);
+	}
+	catch (const std::exception& e) {
+		LOG_ERROR << "Error sending to client " << client->GetId() << ": " << e.what();
+		RemoveClient(client);
 	}
 }
 
-void Server::sendLargeMessage(int sockfd, const std::string &message, size_t chunkSize) {
+void Server::RemoveClient(const std::shared_ptr<Client>& client) {
+	if (!client) return;
+
+	std::lock_guard<std::mutex> lock(clientsMutex);
+	auto it = std::remove_if(clients.begin(), clients.end(),
+	                         [&client](const std::shared_ptr<Client>& c) {
+		                         return c->GetId() == client->GetId();
+	                         });
+
+	if (it != clients.end()) {
+		clients.erase(it, clients.end());
+		LOG_INFO << "Client removed: " << client->GetId();
+	}
+}
+
+std::shared_ptr<Client> Server::GetClientByIndex(const std::string& id) {
+	std::lock_guard<std::mutex> lock(clientsMutex);
+	auto it = std::find_if(clients.begin(), clients.end(),
+	                       [&id](const std::shared_ptr<Client>& c) {
+		                       return c->GetId() == id;
+	                       });
+
+	return (it != clients.end()) ? *it : nullptr;
+}
+
+void Server::setNonBlocking(int sockfd) {
+	int flags = fcntl(sockfd, F_GETFL, 0);
+	if (flags == -1) {
+		throw std::runtime_error("Failed to get socket flags: " + std::string(strerror(errno)));
+	}
+
+	if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) == -1) {
+		throw std::runtime_error("Failed to set socket non-blocking: " + std::string(strerror(errno)));
+	}
+}
+
+void Server::sendLargeMessage(int sockfd, const std::string& message, size_t chunkSize) {
 	size_t totalSize = message.size();
 	size_t offset = 0;
 
@@ -158,69 +230,16 @@ void Server::sendLargeMessage(int sockfd, const std::string &message, size_t chu
 		ssize_t sent = send(sockfd, message.c_str() + offset, bytesToSend, 0);
 
 		if (sent < 0) {
-			perror("send error");
-			throw std::runtime_error("Failed to send message.");
+			throw std::runtime_error("Failed to send message: " + std::string(strerror(errno)));
 		}
 
 		offset += sent;
 	}
 }
 
-// List all connected clients
 void Server::ListClients() {
-
-	for (const auto &client: clients) {
-		LOG_TRACE << "|" << client.name << "|" << client.clientType << endl;
-	}
-}
-
-// Remove a client from the list and clean up resources
-void Server::RemoveClient(Client *client) {
-
-	int index = FindClientIndex(client);
-	if (index != -1) {
-		clients.erase(clients.begin() + index);
-		LOG_INFO << "Client removed: " << client->id;
-	} else {
-		LOG_ERROR << "Client not found for removal: " << client->id;
-	}
-
-	shutdown(client->sock, SHUT_RDWR);
-	close(client->sock);
-}
-
-// Find the index of a client in the list
-int Server::FindClientIndex(Client *client) {
-
-
-	for (size_t i = 0; i < clients.size(); ++i) {
-		if (clients[i].id == client->id) {
-			return static_cast<int>(i);
-		}
-	}
-	LOG_ERROR << "Client ID not found: " << client->id;
-	return -1;
-}
-
-// Get a client by ID
-Client *Server::GetClientByIndex(const std::string &id) {
-
-	for (auto &client: clients) {
-		if (client.id == id) {
-			return &client;
-		}
-	}
-	return nullptr;
-}
-
-
-void Server::setNonBlocking(int sockfd) {
-	int flags = fcntl(sockfd, F_GETFL, 0);
-	if (flags == -1) {
-		perror("fcntl F_GETFL");
-		return;
-	}
-	if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) == -1) {
-		perror("fcntl F_SETFL");
+	std::lock_guard<std::mutex> lock(clientsMutex);
+	for (const auto& client : clients) {
+		LOG_TRACE << "|" << client->GetName() << "|" << client->GetClientType();
 	}
 }
