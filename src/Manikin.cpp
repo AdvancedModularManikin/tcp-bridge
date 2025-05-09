@@ -605,7 +605,7 @@ void Manikin::onNewOperationalDescription(AMM::OperationalDescription &opD, Samp
 	           << std::endl;
 	string stringOut = messageOut.str();
 
-	LOG_DEBUG << "Received an Operational Description via DDS, republishing to TCP clients: " << stringOut;
+	// LOG_DEBUG << "Received an Operational Description via DDS, republishing to TCP clients: " << stringOut;
 
 	auto it = clientMap.begin();
 	while (it != clientMap.end()) {
@@ -1093,7 +1093,7 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 					}
 					std::lock_guard <std::mutex> lock(m_topicmutex);
 					Utility::add_once(subscribedTopics[c->id], subTopicName);
-					LOG_TRACE << "[" << capabilityName << "][" << c->id << "] Subscribing to " << subTopicName;
+					// LOG_TRACE << "[" << capabilityName << "][" << c->id << "] Subscribing to " << subTopicName;
 				}
 			}
 
@@ -1108,7 +1108,7 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 					std::string pubTopicName = p->Attribute("name");
 					std::lock_guard <std::mutex> lock(m_topicmutex);
 					Utility::add_once(publishedTopics[c->id], pubTopicName);
-					LOG_TRACE << "[" << capabilityName << "][" << c->id << "] Publishing " << pubTopicName;
+					// LOG_TRACE << "[" << capabilityName << "][" << c->id << "] Publishing " << pubTopicName;
 				}
 			}
 		}

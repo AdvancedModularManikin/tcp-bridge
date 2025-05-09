@@ -99,8 +99,15 @@ void handleClientDisconnection(Client *c) {
 	UpdateGameClient(c->id, gc);
 	broadcastDisconnection(gc);
 
-	std::lock_guard<std::mutex> lock(Server::clientsMutex);
-	clientMap.erase(c->id);
+	{
+		std::lock_guard<std::mutex> lock(Server::clientsMutex);
+		clientMap.erase(c->id);
+		globalInboundBuffer.erase(c->id);
+
+		// Clean up topic subscriptions
+		subscribedTopics.erase(c->id);
+		publishedTopics.erase(c->id);
+	}
 
 	Server::RemoveClient(c);
 }
@@ -320,7 +327,7 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 
 // Handler for "KEEPALIVE" messages - do nothing but log it for monitoring purposes
 void handleKeepAliveMessage(Client *c) {
-	LOG_TRACE << "Received KEEPALIVE from client " << c->id;
+	// LOG_TRACE << "Received KEEPALIVE from client " << c->id;
 }
 
 void processClientMessage(Client *c, const std::string &message) {
@@ -353,8 +360,8 @@ void processClientMessage(Client *c, const std::string &message) {
 		} else {
 			LOG_ERROR << "Malformed generic topic message from client " << c->id << ": " << message;
 		}
-	} else if (message.find("Module Connected") == 0) {
-		// Module connected message, ignore
+	} else if (message.find(" Connected") == 0) {
+		LOG_INFO << "Module connection message: " << message;
 	} else {
 		// Log an unknown or unsupported message type
 		LOG_ERROR << "Unknown or unsupported message from client " << c->id << ": " << message;
@@ -381,41 +388,85 @@ void *Server::HandleClient(void *args) {
 	gc.connect_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 	UpdateGameClient(c->id, gc);
 
+	// Set socket to non-blocking
+	int flags = fcntl(c->sock, F_GETFL, 0);
+	fcntl(c->sock, F_SETFL, flags | O_NONBLOCK);
+
+	struct timeval tv;
+	tv.tv_sec = 10;  // 10 second timeout
+	tv.tv_usec = 0;
+	setsockopt(c->sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+	setsockopt(c->sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
+
 	while (true) {
 		memset(buffer, 0, sizeof(buffer));
-		n = recv(c->sock, buffer, sizeof(buffer), 0);
 
-		// Check if client disconnected
-		if (n == 0) {
-			LOG_INFO << c->name << " disconnected";
-			handleClientDisconnection(c);
-			break;
-		} else if (n < 0) {
-			LOG_ERROR << "Error while receiving message from client: " << c->name;
+		// Use select() to wait for data with timeout
+		fd_set readfds;
+		FD_ZERO(&readfds);
+		FD_SET(c->sock, &readfds);
+
+		// Set timeout for select
+		struct timeval timeout;
+		timeout.tv_sec = 5;  // 5 second timeout
+		timeout.tv_usec = 0;
+
+		int activity = select(c->sock + 1, &readfds, NULL, NULL, &timeout);
+
+		if (activity < 0) {
+			LOG_ERROR << "Select error for client " << c->id << ": " << strerror(errno);
+			if (errno != EINTR) {
+				break;
+			}
 			continue;
 		}
 
-		// Process received message
-		std::string tempBuffer(buffer);
-		globalInboundBuffer[c->id] += tempBuffer;
-
-		if (!boost::algorithm::ends_with(globalInboundBuffer[c->id], "\n")) {
+		// No data available within timeout
+		if (activity == 0) {
+			// Optional: send keep-alive ping
 			continue;
 		}
 
-		auto messages = Utility::explode("\n", globalInboundBuffer[c->id]);
-		globalInboundBuffer[c->id].clear();
+		// Read data if available
+		if (FD_ISSET(c->sock, &readfds)) {
+			n = recv(c->sock, buffer, sizeof(buffer), 0);
 
-		for (auto &message: messages) {
-			boost::trim(message);
-			if (message.empty()) continue;
+			// Check if client disconnected
+			if (n == 0) {
+				LOG_INFO << c->name << " disconnected";
+				handleClientDisconnection(c);
+				break;
+			} else if (n < 0) {
+				if (errno == EAGAIN || errno == EWOULDBLOCK) {
+					// No data available, not an error
+					continue;
+				}
+				LOG_ERROR << "Error while receiving message from client: " << c->name << ": " << strerror(errno);
+				handleClientDisconnection(c);
+				break;
+			}
 
-			if (message.find("KEEPALIVE") != std::string::npos) {
-				// Handle KEEPALIVE message
+			// Process received message
+			std::string tempBuffer(buffer);
+			globalInboundBuffer[c->id] += tempBuffer;
+
+			if (!boost::algorithm::ends_with(globalInboundBuffer[c->id], "\n")) {
 				continue;
 			}
 
-			processClientMessage(c, message);
+			auto messages = Utility::explode("\n", globalInboundBuffer[c->id]);
+			globalInboundBuffer[c->id].clear();
+
+			for (auto &message: messages) {
+				boost::trim(message);
+				if (message.empty()) continue;
+
+				try {
+					processClientMessage(c, message);
+				} catch (std::exception &e) {
+					LOG_ERROR << "Exception while processing client message: " << e.what();
+				}
+			}
 		}
 	}
 	return nullptr;

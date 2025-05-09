@@ -24,6 +24,9 @@ Server::Server(int port) {
 	setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
 	setsockopt(serverSock, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int));
 
+	// Add non-blocking socket option
+	fcntl(serverSock, F_SETFL, O_NONBLOCK);
+
 	// Bind the socket
 	if (bind(serverSock, (struct sockaddr*)&serverAddr, sizeof(sockaddr_in)) < 0) {
 		throw runtime_error("Failed to bind socket");
@@ -37,22 +40,59 @@ Server::Server(int port) {
 	LOG_INFO << "Server initialized on port " << port;
 }
 
+
 // Accept new connections and dispatch them to threads
 void Server::AcceptAndDispatch() {
 	socklen_t cliSize = sizeof(sockaddr_in);
 
 	while (m_runThread) {
 		auto* client = new Client();
+
+		// Set the accept() to use a timeout with select()
+		fd_set readfds;
+		FD_ZERO(&readfds);
+		FD_SET(serverSock, &readfds);
+
+		struct timeval timeout;
+		timeout.tv_sec = 1;  // 1 second timeout
+		timeout.tv_usec = 0;
+
+		int activity = select(serverSock + 1, &readfds, NULL, NULL, &timeout);
+
+		if (activity < 0) {
+			if (errno != EINTR) {
+				LOG_ERROR << "Select error on server socket: " << strerror(errno);
+				// Consider adding a short sleep here
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			}
+			delete client;
+			continue;
+		}
+
+		if (activity == 0) {
+			// Timeout, no new connections
+			delete client;
+			continue;
+		}
+
+		// Accept new connection
 		client->sock = accept(serverSock, (struct sockaddr*)&clientAddr, &cliSize);
 
 		if (client->sock < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				// No new connection available
+				delete client;
+				continue;
+			}
+
 			LOG_ERROR << "Error on accept: " << strerror(errno);
 			delete client;
 
 			if (errno == EINTR) {
 				continue; // Retry on interrupt
 			} else {
-				break; // Exit on fatal error
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+				continue; // Continue instead of breaking to avoid service interruption
 			}
 		}
 
@@ -60,8 +100,8 @@ void Server::AcceptAndDispatch() {
 		try {
 			auto* clientThread = new ServerThread();
 			clientThread->Create((void*)Server::HandleClient, client);
-		} catch (...) {
-			LOG_ERROR << "Failed to create thread for client";
+		} catch (std::exception& e) {
+			LOG_ERROR << "Failed to create thread for client: " << e.what();
 			close(client->sock);
 			delete client;
 		}
@@ -71,9 +111,14 @@ void Server::AcceptAndDispatch() {
 	LOG_INFO << "Server stopped accepting connections.";
 }
 
-// Send a message to all clients
+// Overloaded version to send a C-string
+void Server::SendToAll(char* message) {
+	SendToAll(std::string(message));
+}
+
+// Send a message to a specific client
 void Server::SendToAll(const std::string& message) {
-//	std::lock_guard<std::mutex> lock(clientsMutex);
+	std::lock_guard<std::mutex> lock(clientsMutex); // Uncomment this
 
 	for (auto& client : clients) {
 		if (send(client.sock, message.c_str(), message.length(), 0) < 0) {
@@ -82,14 +127,9 @@ void Server::SendToAll(const std::string& message) {
 	}
 }
 
-// Overloaded version to send a C-string
-void Server::SendToAll(char* message) {
-	SendToAll(std::string(message));
-}
-
 // Send a message to a specific client
 void Server::SendToClient(Client* client, const std::string& message) {
-	// std::lock_guard<std::mutex> lock(clientsMutex);
+	std::lock_guard<std::mutex> lock(clientsMutex); // Uncomment this
 
 	if (send(client->sock, message.c_str(), message.length(), 0) < 0) {
 		LOG_ERROR << "Error sending to client " << client->id << ": " << strerror(errno);

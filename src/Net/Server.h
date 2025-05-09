@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <thread>
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
