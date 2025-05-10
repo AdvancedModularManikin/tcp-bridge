@@ -4,20 +4,19 @@ std::mutex gcMapMutex;
 
 ConnectionData GetGameClient(std::string id) {
 	std::lock_guard<std::mutex> lock(gcMapMutex);
-    auto i = gameClientList.find(id);
-    if (i == gameClientList.end()) {
-        return {};
-    }
-    else {
-        return i->second;
-    }
+	auto i = gameClientList.find(id);
+	if (i == gameClientList.end()) {
+		return {};
+	}
+	else {
+		return i->second;
+	}
 }
-
 
 void UpdateGameClient(std::string id, ConnectionData cData) {
 	std::lock_guard<std::mutex> lock(gcMapMutex);
-    gameClientList.insert_or_assign(id, cData);
-    // PublishClientDataUpdate(cData);
+	gameClientList.insert_or_assign(id, cData);
+	// PublishClientDataUpdate(cData);
 }
 
 std::vector<std::string> split (const std::string &s, char delim) {
@@ -43,7 +42,7 @@ std::string ExtractTypeFromRenderMod(std::string payload) {
         }
     }
     return {};
-};
+}
 
 
 

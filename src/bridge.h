@@ -1,5 +1,3 @@
-#pragma once
-
 #ifndef BRIDGE_H
 #define BRIDGE_H
 
@@ -62,11 +60,8 @@ std::string ExtractTypeFromRenderMod(std::string payload);
 
 std::string ExtractIDFromString(std::string in);
 
-//std::string ExtractManikinIDFromString(std::string in);
 std::string gen_random(const int len);
 
 void WritePassword(std::string str);
-
-std::string ReadPassword();
 
 #endif

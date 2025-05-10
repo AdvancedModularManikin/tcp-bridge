@@ -1,28 +1,37 @@
-#pragma once
+#ifndef SERVERTHREAD_H
+#define SERVERTHREAD_H
 
-#include <iostream>
-#include <sstream>
-#include <string>
-#include <vector>
-#include <map>
-
-#include <cstdlib>
 #include <pthread.h>
-#include <unistd.h>
-
-using namespace std;
+#include <iostream>
+#include <atomic>
+#include <memory>
+#include <functional>
+#include <cstring> // For strerror
 
 class ServerThread {
 public:
-    pthread_t tid;
+	ServerThread();
+	~ServerThread();
+
+	// Modified to return the thread ID
+	pthread_t Create(void *Callback, void *args);
+	int Join();
+	bool IsCompleted() const { return completed; }
+	pthread_t GetThreadId() const { return tid; }
+
+	// Add a static method to manage thread cleanup
+	static void* ThreadCleanupWrapper(void* data);
 
 private:
+	pthread_t tid;
+	std::atomic<bool> completed{false};
 
-public:
-    ServerThread();
-
-    int Create(void *Callback, void *args);
-
-    int Join();
-
+	// Structure to hold thread data
+	struct ThreadData {
+		ServerThread* thread;
+		void* callback;
+		void* args;
+	};
 };
+
+#endif // SERVERTHREAD_H

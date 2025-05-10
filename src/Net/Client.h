@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <utility>
 
 #define MAX_NAME_LENGTH 40
 
@@ -16,8 +17,6 @@ public:
     std::string uuid;
     std::string clientType;
 
-    bool keepHistory = false;
-
     // Socket stuff
     int sock{};
 
@@ -27,10 +26,7 @@ public:
 
     void SetName(std::string &name);
 
-    void SetUUID(std::string &uuid);
-
     void SetClientType(std::string &clientType);
 
-    void SetKeepHistory(bool historyflag);
 };
 

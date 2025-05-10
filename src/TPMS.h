@@ -1,31 +1,28 @@
-#pragma once
+#ifndef TPMS_H
+#define TPMS_H
 
 #include "Manikin.h"
-#include <map>
 #include <string>
+#include <map>
+#include <memory>
+#include <mutex>
 
 class TPMS {
 public:
 	TPMS();
 	~TPMS();
 
-	// Setters
 	void SetID(const std::string& id);
 	void SetMode(bool podMode);
-
-	// Manikin initialization
-	void InitializeManikins(int count);
 	void InitializeManikin(const std::string& manikinId);
-
-	// Accessor
+	void InitializeManikins(int count);
 	Manikin* GetManikin(const std::string& manikinId);
 
 private:
-	// Member variables
-	std::string myID;                 // ID of the TPMS
-	bool mode{};                        // Mode (podMode)
-
-	// Manikin management
-	std::map<std::string, Manikin*> manikins; // Map to store manikins dynamically by ID
-	// std::map<std::string, std::unique_ptr<Manikin>> manikins;
+	std::string myID;
+	bool mode = false;
+	std::map<std::string, Manikin*> manikins;
+	std::mutex manikinsMutex;
 };
+
+#endif // TPMS_H

@@ -16,6 +16,8 @@
 
 #include "bridge.h"
 
+using namespace std;
+
 class Manikin : ListenerInterface {
 
 protected:
@@ -24,10 +26,6 @@ protected:
 
     std::map <std::string, AMM::EventRecord> eventRecords;
     std::string manikin_id;
-
-
-  std::mutex m_mapmutex;
-  std::mutex m_topicmutex;
 
     std::map <std::string, std::map<std::string, double>> labNodes;
 
@@ -64,20 +62,16 @@ public:
 
     bool podMode = false;
 
-  //  AMM::DDSManager <Manikin> *mgr;
   std::unique_ptr<AMM::DDSManager<Manikin>> mgr;
 
 
     static std::string ExtractServiceFromCommand(const std::string& in);
 
-	std::string ExtractType(const std::string& in);
     void MakePrimary();
     void MakeSecondary();
     static bool isAuthorized();
     void sendConfig(Client *c, const std::string& scene, const std::string& clientType);
     void sendConfigToAll(const std::string& scene);
-
-    void ParseCapabilities(tinyxml2::XMLElement *node);
 
     void PublishSettings(std::string const &equipmentType);
 
@@ -163,6 +157,14 @@ private:
                                                         {"IVARM_STATE",    ""}};
 
     bool isPaused = false;
+	std::mutex m_mapmutex;                  // For clientTypeMap
+	std::mutex m_clientMapMutex;            // For clientMap
+	std::mutex m_topicMutex;                // For subscribedTopics and publishedTopics
+	std::mutex m_labMutex;                  // For labNodes
+	std::mutex m_eventRecordMutex;          // For eventRecords
+	std::mutex m_equipmentSettingsMutex;    // For equipmentSettings
+	std::mutex m_statusMutex;               // For currentStatus, currentScenario, currentState, and isPaused
+	std::mutex gcMapMutex;
 
 protected:
 
@@ -202,11 +204,13 @@ protected:
     /// Event listener for Physiology Modification.
     void onNewPhysiologyModification(AMM::PhysiologyModification &physMod, SampleInfo_t *info);
 
-    /// Event lsitener for Command.
+    /// Event listener for Command.
     void onNewCommand(AMM::Command &command, eprosima::fastrtps::SampleInfo_t *info);
 
+	/// Event listener for physiology waves
     void onNewPhysiologyWaveform(AMM::PhysiologyWaveform &n, SampleInfo_t *info);
 
+	/// Event listener for physiology values
     void onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info);
 
 

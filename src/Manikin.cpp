@@ -1,6 +1,6 @@
-
 #include "Manikin.h"
 
+using namespace std;
 using namespace AMM;
 
 namespace bp = boost::process;
@@ -14,8 +14,7 @@ Manikin::Manikin(const std::string &mid, bool pm, std::string pid) {
 	if (podMode) {
 		LOG_INFO << "\tCurrently in POD/TPMS mode.";
 	}
-	//	mgr = new DDSManager<Manikin>(config_file, manikin_id);
-	mgr = std::make_unique < DDSManager < Manikin >> (config_file, manikin_id);
+	mgr = std::make_unique<DDSManager<Manikin>>(config_file, manikin_id);
 
 	mgr->InitializeCommand();
 	mgr->InitializeInstrumentData();
@@ -30,7 +29,6 @@ Manikin::Manikin(const std::string &mid, bool pm, std::string pid) {
 	mgr->InitializeModuleConfiguration();
 	mgr->InitializeStatus();
 	mgr->InitializeOmittedEvent();
-
 
 	mgr->CreatePhysiologyValueSubscriber(this, &Manikin::onNewPhysiologyValue);
 	mgr->CreatePhysiologyWaveformSubscriber(this, &Manikin::onNewPhysiologyWaveform);
@@ -84,16 +82,42 @@ void Manikin::sendConfig(Client *c, const std::string &scene, const std::string 
 
 void Manikin::sendConfigToAll(const std::string &scene) {
 	LOG_DEBUG << "Sending config to all for scene " << scene;
-	auto it = clientMap.begin();
-	while (it != clientMap.end()) {
-		std::string cid = it->first;
-		std::string clientType = clientTypeMap[it->first];
-		Client *c = Server::GetClientByIndex(cid);
+
+	// Collect client data first while holding the lock
+	std::vector<std::pair<std::string, std::string>> clientConfigs;
+
+	{
+		std::lock_guard<std::mutex> lock(m_clientMapMutex);
+
+		for (const auto& clientEntry : clientMap) {
+			std::string cid = clientEntry.first;
+
+			// Find the client type
+			auto typeIt = clientTypeMap.find(cid);
+			if (typeIt == clientTypeMap.end()) {
+				LOG_WARNING << "Client " << cid << " has no type defined, skipping config";
+				continue;
+			}
+
+			std::string clientType = typeIt->second;
+			clientConfigs.emplace_back(cid, clientType);
+		}
+	}
+
+	// Now process each client without holding the lock
+	for (const auto& [cid, clientType] : clientConfigs) {
+		Client* c = nullptr;
+		{
+			std::lock_guard<std::mutex> lock(Server::clientsMutex);
+			c = Server::GetClientByIndex(cid);
+		}
+
 		if (c) {
 			LOG_DEBUG << "Sending data to client " << cid << ", type " << clientType << " for scene " << scene;
 			sendConfig(c, scene, clientType);
+		} else {
+			LOG_WARNING << "Client " << cid << " no longer exists, skipping config";
 		}
-		++it;
 	}
 }
 
@@ -107,22 +131,8 @@ void Manikin::MakeSecondary() {
 	LOG_INFO << "Making " << parentId << " into a secondary.";
 	// bp::system("supervisorctl start amm_startup");
 	// bp::system("supervisorctl stop amm_tpms_bridge");
-
 }
 
-std::string Manikin::ExtractType(const std::string &in) {
-	std::size_t pos = in.find("type=");
-	if (pos != std::string::npos) {
-		std::string mid1 = in.substr(pos + 5);
-		std::size_t pos1 = mid1.find(';');
-		if (pos1 != std::string::npos) {
-			std::string mid2 = mid1.substr(0, pos1);
-			return mid2;
-		}
-		return mid1;
-	}
-	return {};
-}
 
 std::string Manikin::ExtractServiceFromCommand(const std::string &in) {
 	std::size_t pos = in.find("service=");
@@ -165,105 +175,149 @@ void Manikin::onNewStatus(AMM::Status &st, SampleInfo_t *info) {
 
 	LOG_TRACE << " Sending status message to clients: " << messageOut.str();
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
-	auto it = clientMap.begin();
-	while (it != clientMap.end()) {
-		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
+	// Create a local copy of client IDs and their subscribed topics
+	std::vector<std::pair<std::string, Client *>> clientsToSend;
 
-		if (std::find(subV.begin(), subV.end(), "AMM_Status") != subV.end()) {
-			Client *c = Server::GetClientByIndex(cid);
-			if (c) {
-				Server::SendToClient(c, stringOut);
+	{
+		std::lock_guard<std::mutex> lock(m_clientMapMutex);
+		std::lock_guard<std::mutex> topicLock(m_topicMutex);
+		std::lock_guard<std::mutex> serverLock(Server::clientsMutex);
+
+		for (auto &it: clientMap) {
+			std::string cid = it.first;
+			std::vector<std::string> subV = subscribedTopics[cid];
+
+			if (std::find(subV.begin(), subV.end(), "AMM_Status") != subV.end()) {
+				Client *c = Server::GetClientByIndex(cid);
+				if (c) {
+					clientsToSend.emplace_back(cid, c);
+				}
 			}
 		}
-		++it;
 	}
 
+	// Now send to clients without holding the locks
+	for (auto &[cid, client]: clientsToSend) {
+		Server::SendToClient(client, stringOut);
+	}
 }
 
 void Manikin::onNewModuleConfiguration(AMM::ModuleConfiguration &mc, SampleInfo_t *info) {
 	LOG_DEBUG << "Received module config from manikin " << manikin_id << " for " << mc.name();
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
-	auto it = clientMap.begin();
-	while (it != clientMap.end()) {
-		std::string cid = it->first;
-		std::string clientType;
-		auto pos = clientTypeMap.find(it->first);
-		if (pos == clientTypeMap.end()) {
-			//handle the error
-		} else {
-			clientType = pos->second;
-		}
-		if (clientType.find(mc.name()) != std::string::npos || mc.name() == "metadata") {
-			Client *c = Server::GetClientByIndex(cid);
-			if (c) {
-				std::string capConfig = mc.capabilities_configuration().to_string();
-				std::string encodedConfigContent = Utility::encode64(capConfig);
-				std::ostringstream encodedConfig;
-				encodedConfig << configPrefix << encodedConfigContent << ";mid=" << manikin_id << std::endl;
-				Server::SendToClient(c, encodedConfig.str());
+	// Create a local copy of client information
+	std::vector<std::pair<std::string, Client *>> clientsToSend;
+
+	{
+		std::lock_guard<std::mutex> lock(m_clientMapMutex);
+		std::lock_guard<std::mutex> serverLock(Server::clientsMutex);
+
+		for (auto &it: clientMap) {
+			std::string cid = it.first;
+			std::string clientType;
+
+			auto pos = clientTypeMap.find(cid);
+			if (pos != clientTypeMap.end()) {
+				clientType = pos->second;
+
+				if (clientType.find(mc.name()) != std::string::npos || mc.name() == "metadata") {
+					Client *c = Server::GetClientByIndex(cid);
+					if (c) {
+						clientsToSend.emplace_back(cid, c);
+					}
+				}
 			}
 		}
-		++it;
+	}
+
+	// Now send to clients without holding the locks
+	for (auto &[cid, client]: clientsToSend) {
+		std::string capConfig = mc.capabilities_configuration().to_string();
+		std::string encodedConfigContent = Utility::encode64(capConfig);
+		std::ostringstream encodedConfig;
+		encodedConfig << configPrefix << encodedConfigContent << ";mid=" << manikin_id << std::endl;
+		Server::SendToClient(client, encodedConfig.str());
 	}
 }
 
-/// Event handler for incoming Physiology Waveform data.
 void Manikin::onNewPhysiologyWaveform(AMM::PhysiologyWaveform &n, SampleInfo_t *info) {
 	std::string hfname = "HF_" + n.name();
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
 
-	auto it = clientMap.begin();
-	while (it != clientMap.end()) {
-		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
-		if (std::find(subV.begin(), subV.end(), hfname) != subV.end()) {
-			Client *c = Server::GetClientByIndex(cid);
-			if (c) {
-				std::ostringstream messageOut;
-				if (podMode) {
-					messageOut << n.name() << "=" << n.value() << ";mid=" << manikin_id << "|" << std::endl;
-				} else {
-					messageOut << n.name() << "=" << n.value() << "|" << std::endl;
+	// Create a local copy of client information
+	std::vector<std::pair<std::string, Client *>> clientsToSend;
+
+	{
+		std::lock_guard<std::mutex> lock(m_clientMapMutex);
+		std::lock_guard<std::mutex> topicLock(m_topicMutex);
+		std::lock_guard<std::mutex> serverLock(Server::clientsMutex);
+
+		for (auto &it: clientMap) {
+			std::string cid = it.first;
+			std::vector<std::string> subV = subscribedTopics[cid];
+
+			if (std::find(subV.begin(), subV.end(), hfname) != subV.end()) {
+				Client *c = Server::GetClientByIndex(cid);
+				if (c) {
+					clientsToSend.emplace_back(cid, c);
 				}
-				string stringOut = messageOut.str();
-				Server::SendToClient(c, messageOut.str());
 			}
 		}
-		++it;
+	}
+
+	// Now send to clients without holding the locks
+	for (auto &[cid, client]: clientsToSend) {
+		std::ostringstream messageOut;
+		if (podMode) {
+			messageOut << n.name() << "=" << n.value() << ";mid=" << manikin_id << "|" << std::endl;
+		} else {
+			messageOut << n.name() << "=" << n.value() << "|" << std::endl;
+		}
+		Server::SendToClient(client, messageOut.str());
 	}
 }
 
 void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) {
 	// Drop values into the lab sheets
-	for (auto &outer_map_pair: labNodes) {
-		if (labNodes[outer_map_pair.first].find(n.name()) !=
-		    labNodes[outer_map_pair.first].end()) {
-			labNodes[outer_map_pair.first][n.name()] = n.value();
+	{
+		std::lock_guard<std::mutex> labLock(m_labMutex);
+		for (auto &outer_map_pair: labNodes) {
+			if (labNodes[outer_map_pair.first].find(n.name()) !=
+			    labNodes[outer_map_pair.first].end()) {
+				labNodes[outer_map_pair.first][n.name()] = n.value();
+			}
 		}
 	}
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
-	auto it = clientMap.begin();
-	while (it != clientMap.end()) {
-		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
+	// Create a local copy of client information
+	std::vector<std::pair<std::string, Client *>> clientsToSend;
 
-		if (std::find(subV.begin(), subV.end(), n.name()) != subV.end()) {
-			Client *c = Server::GetClientByIndex(cid);
-			if (c) {
-				std::ostringstream messageOut;
-				if (podMode) {
-					messageOut << n.name() << "=" << n.value() << ";mid=" << manikin_id << "|" << std::endl;
-				} else {
-					messageOut << n.name() << "=" << n.value() << "|" << std::endl;
+	{
+		std::lock_guard<std::mutex> lock(m_clientMapMutex);
+		std::lock_guard<std::mutex> topicLock(m_topicMutex);
+		std::lock_guard<std::mutex> serverLock(Server::clientsMutex);
+
+		for (auto &it: clientMap) {
+			std::string cid = it.first;
+			std::vector<std::string> subV = subscribedTopics[cid];
+
+			if (std::find(subV.begin(), subV.end(), n.name()) != subV.end()) {
+				Client *c = Server::GetClientByIndex(cid);
+				if (c) {
+					clientsToSend.emplace_back(cid, c);
 				}
-				Server::SendToClient(c, messageOut.str());
 			}
 		}
-		++it;
+	}
+
+	// Now send to clients without holding the locks
+	for (auto &[cid, client]: clientsToSend) {
+		std::ostringstream messageOut;
+		if (podMode) {
+			messageOut << n.name() << "=" << n.value() << ";mid=" << manikin_id << "|" << std::endl;
+		} else {
+			messageOut << n.name() << "=" << n.value() << "|" << std::endl;
+		}
+		Server::SendToClient(client, messageOut.str());
 	}
 }
 
@@ -272,10 +326,13 @@ void Manikin::onNewPhysiologyModification(AMM::PhysiologyModification &pm, Sampl
 	std::string location;
 	std::string practitioner;
 
-	if (eventRecords.count(pm.event_id().id()) > 0) {
-		AMM::EventRecord er = eventRecords[pm.event_id().id()];
-		location = er.location().name();
-		practitioner = er.agent_id().id();
+	{
+		std::lock_guard<std::mutex> erLock(m_eventRecordMutex);
+		if (eventRecords.count(pm.event_id().id()) > 0) {
+			AMM::EventRecord er = eventRecords[pm.event_id().id()];
+			location = er.location().name();
+			practitioner = er.agent_id().id();
+		}
 	}
 
 	std::ostringstream messageOut;
@@ -292,21 +349,31 @@ void Manikin::onNewPhysiologyModification(AMM::PhysiologyModification &pm, Sampl
 
 	LOG_DEBUG << "Received a phys mod via DDS, republishing to TCP clients: " << stringOut;
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
-	auto it = clientMap.begin();
-	while (it != clientMap.end()) {
-		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
+	// Create a local copy of client information
+	std::vector<std::pair<std::string, Client *>> clientsToSend;
 
-		if (std::find(subV.begin(), subV.end(), pm.type()) != subV.end() ||
-		    std::find(subV.begin(), subV.end(), "AMM_Physiology_Modification") !=
-		    subV.end()) {
-			Client *c = Server::GetClientByIndex(cid);
-			if (c) {
-				Server::SendToClient(c, stringOut);
+	{
+		std::lock_guard<std::mutex> lock(m_clientMapMutex);
+		std::lock_guard<std::mutex> topicLock(m_topicMutex);
+		std::lock_guard<std::mutex> serverLock(Server::clientsMutex);
+
+		for (auto &it: clientMap) {
+			std::string cid = it.first;
+			std::vector<std::string> subV = subscribedTopics[cid];
+
+			if (std::find(subV.begin(), subV.end(), pm.type()) != subV.end() ||
+			    std::find(subV.begin(), subV.end(), "AMM_Physiology_Modification") != subV.end()) {
+				Client *c = Server::GetClientByIndex(cid);
+				if (c) {
+					clientsToSend.emplace_back(cid, c);
+				}
 			}
 		}
-		++it;
+	}
+
+	// Now send to clients without holding the locks
+	for (auto &[cid, client]: clientsToSend) {
+		Server::SendToClient(client, stringOut);
 	}
 }
 
@@ -328,7 +395,12 @@ void Manikin::onNewOmittedEvent(AMM::OmittedEvent &oe, SampleInfo_t *info) {
 	er.data(oe.data());
 
 	LOG_DEBUG << "Received an omitted event record of type " << er.type() << " from manikin " << manikin_id;
-	eventRecords[er.id().id()] = er;
+
+	{
+		std::lock_guard<std::mutex> erLock(m_eventRecordMutex);
+		eventRecords[er.id().id()] = er;
+	}
+
 	location = er.location().name();
 	practitioner = er.agent_id().id();
 	eType = er.type();
@@ -349,18 +421,31 @@ void Manikin::onNewOmittedEvent(AMM::OmittedEvent &oe, SampleInfo_t *info) {
 	string stringOut = messageOut.str();
 
 	LOG_DEBUG << "Received an EventRecord via DDS, republishing to TCP clients: " << stringOut;
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
-	auto it = clientMap.begin();
-	while (it != clientMap.end()) {
-		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
-		if (std::find(subV.begin(), subV.end(), "AMM_EventRecord") != subV.end()) {
-			Client *c = Server::GetClientByIndex(cid);
-			if (c) {
-				Server::SendToClient(c, stringOut);
+
+	// Create a local copy of client information
+	std::vector<std::pair<std::string, Client *>> clientsToSend;
+
+	{
+		std::lock_guard<std::mutex> lock(m_clientMapMutex);
+		std::lock_guard<std::mutex> topicLock(m_topicMutex);
+		std::lock_guard<std::mutex> serverLock(Server::clientsMutex);
+
+		for (auto &it: clientMap) {
+			std::string cid = it.first;
+			std::vector<std::string> subV = subscribedTopics[cid];
+
+			if (std::find(subV.begin(), subV.end(), "AMM_EventRecord") != subV.end()) {
+				Client *c = Server::GetClientByIndex(cid);
+				if (c) {
+					clientsToSend.emplace_back(cid, c);
+				}
 			}
 		}
-		++it;
+	}
+
+	// Now send to clients without holding the locks
+	for (auto &[cid, client]: clientsToSend) {
+		Server::SendToClient(client, stringOut);
 	}
 }
 
@@ -373,7 +458,12 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
 
 	LOG_DEBUG << "Received an event record of type " << er.type()
 	          << " from manikin " << manikin_id;
-	eventRecords[er.id().id()] = er;
+
+	{
+		std::lock_guard<std::mutex> erLock(m_eventRecordMutex);
+		eventRecords[er.id().id()] = er;
+	}
+
 	location = er.location().name();
 	practitioner = er.agent_id().id();
 	eType = er.type();
@@ -395,18 +485,30 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
 
 	LOG_DEBUG << "Received an EventRecord via DDS, republishing to TCP clients: " << stringOut;
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
-	auto it = clientMap.begin();
-	while (it != clientMap.end()) {
-		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
-		if (std::find(subV.begin(), subV.end(), "AMM_EventRecord") != subV.end()) {
-			Client *c = Server::GetClientByIndex(cid);
-			if (c) {
-				Server::SendToClient(c, stringOut);
+	// Create a local copy of client information
+	std::vector<std::pair<std::string, Client *>> clientsToSend;
+
+	{
+		std::lock_guard<std::mutex> lock(m_clientMapMutex);
+		std::lock_guard<std::mutex> topicLock(m_topicMutex);
+		std::lock_guard<std::mutex> serverLock(Server::clientsMutex);
+
+		for (auto &it: clientMap) {
+			std::string cid = it.first;
+			std::vector<std::string> subV = subscribedTopics[cid];
+
+			if (std::find(subV.begin(), subV.end(), "AMM_EventRecord") != subV.end()) {
+				Client *c = Server::GetClientByIndex(cid);
+				if (c) {
+					clientsToSend.emplace_back(cid, c);
+				}
 			}
 		}
-		++it;
+	}
+
+	// Now send to clients without holding the locks
+	for (auto &[cid, client]: clientsToSend) {
+		Server::SendToClient(client, stringOut);
 	}
 }
 
@@ -415,13 +517,15 @@ void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo
 	std::string practitioner;
 	std::string eType;
 
-	if (eventRecords.count(a.event_id().id()) > 0) {
-		AMM::EventRecord er = eventRecords[a.event_id().id()];
-		location = er.location().name();
-		practitioner = er.agent_id().id();
-		eType = er.type();
+	{
+		std::lock_guard<std::mutex> erLock(m_eventRecordMutex);
+		if (eventRecords.count(a.event_id().id()) > 0) {
+			AMM::EventRecord er = eventRecords[a.event_id().id()];
+			location = er.location().name();
+			practitioner = er.agent_id().id();
+			eType = er.type();
+		}
 	}
-
 
 	std::ostringstream messageOut;
 
@@ -439,18 +543,30 @@ void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo
 
 	LOG_DEBUG << "Received an assessment via DDS, republishing to TCP clients: " << stringOut;
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
-	auto it = clientMap.begin();
-	while (it != clientMap.end()) {
-		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
-		if (std::find(subV.begin(), subV.end(), "AMM_Assessment") != subV.end()) {
-			Client *c = Server::GetClientByIndex(cid);
-			if (c) {
-				Server::SendToClient(c, stringOut);
+	// Create a local copy of client information
+	std::vector<std::pair<std::string, Client *>> clientsToSend;
+
+	{
+		std::lock_guard<std::mutex> lock(m_clientMapMutex);
+		std::lock_guard<std::mutex> topicLock(m_topicMutex);
+		std::lock_guard<std::mutex> serverLock(Server::clientsMutex);
+
+		for (auto &it: clientMap) {
+			std::string cid = it.first;
+			std::vector<std::string> subV = subscribedTopics[cid];
+
+			if (std::find(subV.begin(), subV.end(), "AMM_Assessment") != subV.end()) {
+				Client *c = Server::GetClientByIndex(cid);
+				if (c) {
+					clientsToSend.emplace_back(cid, c);
+				}
 			}
 		}
-		++it;
+	}
+
+	// Now send to clients without holding the locks
+	for (auto &[cid, client]: clientsToSend) {
+		Server::SendToClient(client, stringOut);
 	}
 }
 
@@ -458,10 +574,13 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 	std::string location;
 	std::string practitioner;
 
-	if (eventRecords.count(rendMod.event_id().id()) > 0) {
-		AMM::EventRecord er = eventRecords[rendMod.event_id().id()];
-		location = er.location().name();
-		practitioner = er.agent_id().id();
+	{
+		std::lock_guard<std::mutex> erLock(m_eventRecordMutex);
+		if (eventRecords.count(rendMod.event_id().id()) > 0) {
+			AMM::EventRecord er = eventRecords[rendMod.event_id().id()];
+			location = er.location().name();
+			practitioner = er.agent_id().id();
+		}
 	}
 
 	std::ostringstream messageOut;
@@ -491,12 +610,12 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 		LOG_INFO << "Render mod Message came in on manikin " << manikin_id << ", republishing to TCP: "
 		         << stringOut;
 	} else {
-		//	  LOG_DEBUG << "Inhale/exhale: " << rendModType << " - " << rendModPayload;
+		// LOG_DEBUG << "Inhale/exhale: " << rendModType << " - " << rendModPayload;
 	}
 
 	if (rendModPayload.find("CHOSE_ROLE") != std::string::npos) {
 		LOG_INFO << "Role chooser, break up participant: " << practitioner;
-		std::vector <std::string> participant_data = split(practitioner, ':');
+		std::vector<std::string> participant_data = split(practitioner, ':');
 		const std::string &pid = participant_data[1];
 		ConnectionData gc = GetGameClient(pid);
 		const auto p1 = std::chrono::system_clock::now();
@@ -521,71 +640,102 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 		mgr->WriteCommand(cmdInstance);
 	}
 
-	std::lock_guard <std::mutex> lock(Server::clientsMutex);
-	auto it = clientMap.begin();
-	while (it != clientMap.end()) {
-		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
-		if (std::find(subV.begin(), subV.end(), rendMod.type()) != subV.end() ||
-		    std::find(subV.begin(), subV.end(), "AMM_Render_Modification") !=
-		    subV.end()) {
-			Client *c = Server::GetClientByIndex(cid);
-			if (c) {
-				Server::SendToClient(c, stringOut);
+	// Create a local copy of client information
+	std::vector<std::pair<std::string, Client *>> clientsToSend;
+
+	{
+		std::lock_guard<std::mutex> lock(m_clientMapMutex);
+		std::lock_guard<std::mutex> topicLock(m_topicMutex);
+		std::lock_guard<std::mutex> serverLock(Server::clientsMutex);
+
+		for (auto &it: clientMap) {
+			std::string cid = it.first;
+			std::vector<std::string> subV = subscribedTopics[cid];
+
+			if (std::find(subV.begin(), subV.end(), rendMod.type()) != subV.end() ||
+			    std::find(subV.begin(), subV.end(), "AMM_Render_Modification") != subV.end()) {
+				Client *c = Server::GetClientByIndex(cid);
+				if (c) {
+					clientsToSend.emplace_back(cid, c);
+				}
 			}
 		}
-		++it;
+	}
+
+	// Now send to clients without holding the locks
+	for (auto &[cid, client]: clientsToSend) {
+		Server::SendToClient(client, stringOut);
 	}
 }
 
 void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleInfo_t *info) {
 	bool doWriteTopic = false;
 	LOG_INFO << "Simulation control Message came in on manikin " << manikin_id;
+
+	std::string newStatus;
+	bool newIsPaused;
+	std::string responseMessage;
+
 	switch (simControl.type()) {
 		case AMM::ControlType::RUN: {
-			currentStatus = "RUNNING";
-			isPaused = false;
+			newStatus = "RUNNING";
+			newIsPaused = false;
 			LOG_INFO << "\tMessage received; Run sim.";
-			std::ostringstream tmsg;
-			tmsg << "[SYS]START_SIM" << ";mid=" << manikin_id << std::endl;
-			Server::SendToAll(tmsg.str());
+			responseMessage = "[SYS]START_SIM";
 			break;
 		}
 
 		case AMM::ControlType::HALT: {
 			if (isPaused) {
-				currentStatus = "PAUSED";
+				newStatus = "PAUSED";
 			} else {
-				currentStatus = "NOT RUNNING";
+				newStatus = "NOT RUNNING";
 			}
+			newIsPaused = true;
 			LOG_INFO << "\tMessage received; Halt sim";
-			std::ostringstream tmsg;
-			tmsg << "[SYS]PAUSE_SIM" << ";mid=" << manikin_id << std::endl;
-			Server::SendToAll(tmsg.str());
+			responseMessage = "[SYS]PAUSE_SIM";
 			break;
 		}
 
 		case AMM::ControlType::RESET: {
-			currentStatus = "NOT RUNNING";
-			isPaused = false;
+			newStatus = "NOT RUNNING";
+			newIsPaused = false;
 			LOG_INFO << "\tMessage received; Reset sim";
-			std::ostringstream tmsg;
-			tmsg << "[SYS]RESET_SIM" << ";mid=" << manikin_id << std::endl;
-			Server::SendToAll(tmsg.str());
+			responseMessage = "[SYS]RESET_SIM";
+
+			// Initialize lab nodes when resetting - use a separate locked operation
+			InitializeLabNodes();
+
 			break;
 		}
 
 		case AMM::ControlType::SAVE: {
 			LOG_INFO << "\tMessage received; Save sim";
 			//SaveSimulation(doWriteTopic);
-			break;
+			// No broadcast necessary for SAVE
+			return;
 		}
 	}
+
+	// Update the status variables under lock
+	{
+		std::lock_guard<std::mutex> statusLock(m_statusMutex);
+		currentStatus = newStatus;
+		isPaused = newIsPaused;
+	}
+
+	// Create the message to send to all clients
+	std::ostringstream tmsg;
+	tmsg << responseMessage << ";mid=" << manikin_id << std::endl;
+
+	// Send to all clients - this is outside any lock
+	Server::SendToAll(tmsg.str());
 }
 
 void Manikin::onNewOperationalDescription(AMM::OperationalDescription &opD, SampleInfo_t *info) {
 	LOG_INFO << "Operational Description came in on manikin " << manikin_id << " (" << opD.name() << ")";
 
+	// Prepare the message without holding locks
 	std::ostringstream messageOut;
 	std::string capSchema = opD.capabilities_schema().to_string();
 	std::string capabilities = Utility::encode64(capSchema);
@@ -605,19 +755,30 @@ void Manikin::onNewOperationalDescription(AMM::OperationalDescription &opD, Samp
 	           << std::endl;
 	string stringOut = messageOut.str();
 
-	// LOG_DEBUG << "Received an Operational Description via DDS, republishing to TCP clients: " << stringOut;
+	// Create a local copy of client information
+	std::vector<std::pair<std::string, Client *>> clientsToSend;
 
-	auto it = clientMap.begin();
-	while (it != clientMap.end()) {
-		std::string cid = it->first;
-		std::vector <std::string> subV = subscribedTopics[cid];
-		if (std::find(subV.begin(), subV.end(), "AMM_OperationalDescription") != subV.end()) {
-			Client *c = Server::GetClientByIndex(cid);
-			if (c) {
-				Server::SendToClient(c, stringOut);
+	{
+		std::lock_guard<std::mutex> lock(m_clientMapMutex);
+		std::lock_guard<std::mutex> topicLock(m_topicMutex);
+		std::lock_guard<std::mutex> serverLock(Server::clientsMutex);
+
+		for (auto &it: clientMap) {
+			std::string cid = it.first;
+			std::vector<std::string> subV = subscribedTopics[cid];
+
+			if (std::find(subV.begin(), subV.end(), "AMM_OperationalDescription") != subV.end()) {
+				Client *c = Server::GetClientByIndex(cid);
+				if (c) {
+					clientsToSend.emplace_back(cid, c);
+				}
 			}
 		}
-		++it;
+	}
+
+	// Now send to clients without holding the locks
+	for (auto &[cid, client]: clientsToSend) {
+		Server::SendToClient(client, stringOut);
 	}
 }
 
@@ -679,58 +840,164 @@ void Manikin::SendModuleConfiguration(const std::string &name,
 	mgr->WriteModuleConfiguration(mc);
 }
 
+void Manikin::DispatchRequest(Client *c, const std::string &request, std::string mid) {
+	if (boost::starts_with(request, "STATUS")) {
+		std::string currentStatusValue;
+		std::string currentScenarioValue;
+		std::string currentStateValue;
+
+		// Get the current status values under lock
+		{
+			std::lock_guard<std::mutex> statusLock(m_statusMutex);
+			currentStatusValue = currentStatus;
+			currentScenarioValue = currentScenario;
+			currentStateValue = currentState;
+		}
+
+		std::ostringstream messageOut;
+		messageOut << "STATUS=" << currentStatusValue << "|"
+		           << "SCENARIO=" << currentScenarioValue << "|"
+		           << "STATE=" << currentStateValue << "|";
+
+		Server::SendToClient(c, messageOut.str());
+	} else if (boost::starts_with(request, "CLIENTS")) {
+		LOG_DEBUG << "Client table request";
+
+		// Create a copy of the game client list
+		std::vector<ConnectionData> clientDataList;
+		{
+			std::lock_guard<std::mutex> lock(gcMapMutex);
+			for (const auto &client: gameClientList) {
+				clientDataList.push_back(client.second);
+			}
+		}
+
+		std::ostringstream messageOut;
+		messageOut
+				<< "client_id,client_name,learner_name,client_connection,client_type,role,client_status,connect_time\n";
+
+		for (const auto &clientData: clientDataList) {
+			messageOut << clientData.client_id << ","
+			           << clientData.client_name << ","
+			           << clientData.learner_name << ","
+			           << clientData.client_connection << ","
+			           << clientData.client_type << ","
+			           << clientData.role << ","
+			           << clientData.client_status << ","
+			           << clientData.connect_time << "\n";
+		}
+
+		Server::SendToClient(c, messageOut.str());
+	} else if (boost::starts_with(request, "LABS")) {
+		LOG_DEBUG << "LABS request: " << request;
+
+		const auto delimiterIdx = request.find_first_of(';');
+		const std::string labCategory = (delimiterIdx != std::string::npos)
+		                                ? request.substr(delimiterIdx + 1)
+		                                : "ALL";
+
+		LOG_DEBUG << "Return lab values for: " << labCategory;
+
+		// Make a copy of the requested lab values
+		std::map<std::string, double> labValuesCopy;
+		{
+			std::lock_guard<std::mutex> labLock(m_labMutex);
+			const auto labIter = labNodes.find(labCategory);
+			if (labIter != labNodes.end()) {
+				labValuesCopy = labIter->second;
+			}
+		}
+
+		if (labValuesCopy.empty()) {
+			LOG_WARNING << "No lab values found for category: " << labCategory;
+			return;
+		}
+
+		for (const auto &lab: labValuesCopy) {
+			std::ostringstream messageOut;
+			messageOut << lab.first << "=" << lab.second << ";mid=" << mid << "|";
+			Server::SendToClient(c, messageOut.str());
+		}
+	} else {
+		LOG_WARNING << "Unknown request type: " << request;
+	}
+}
+
 void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *info) {
 	LOG_INFO << "Command Message came in on manikin " << manikin_id << ": " << c.message();
+
+
 	if (!c.message().compare(0, sysPrefix.size(), sysPrefix)) {
 		std::string value = c.message().substr(sysPrefix.size());
 		std::string mid = ExtractIDFromString(value);
+
+		// Process specific commands
 		if (value.find("START_SIM") != std::string::npos) {
-			currentStatus = "RUNNING";
-			isPaused = false;
+			{
+				std::lock_guard<std::mutex> statusLock(m_statusMutex);
+				currentStatus = "RUNNING";
+				isPaused = false;
+			}
+
 			AMM::SimulationControl simControl;
 			auto ms = duration_cast<std::chrono::milliseconds>(
 					std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::RUN);
 			mgr->WriteSimulationControl(simControl);
+
 			std::string tmsg = "ACT=START_SIM;mid=" + manikin_id;
 			Server::SendToAll(tmsg);
 		} else if (value.find("STOP_SIM") != std::string::npos) {
-			currentStatus = "NOT RUNNING";
-			isPaused = false;
+			{
+				std::lock_guard<std::mutex> statusLock(m_statusMutex);
+				currentStatus = "NOT RUNNING";
+				isPaused = false;
+			}
+
 			AMM::SimulationControl simControl;
 			auto ms = duration_cast<std::chrono::milliseconds>(
 					std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::HALT);
 			mgr->WriteSimulationControl(simControl);
+
 			std::string tmsg = "ACT=STOP_SIM;mid=" + manikin_id;
 			Server::SendToAll(tmsg);
 		} else if (value.find("PAUSE_SIM") != std::string::npos) {
-			currentStatus = "PAUSED";
-			isPaused = true;
+			{
+				std::lock_guard<std::mutex> statusLock(m_statusMutex);
+				currentStatus = "PAUSED";
+				isPaused = true;
+			}
+
 			AMM::SimulationControl simControl;
 			auto ms = duration_cast<std::chrono::milliseconds>(
 					std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::HALT);
 			mgr->WriteSimulationControl(simControl);
+
 			std::string tmsg = "ACT=PAUSE_SIM;mid=" + manikin_id;
 			Server::SendToAll(tmsg);
 		} else if (value.find("RESET_SIM") != std::string::npos) {
-			currentStatus = "NOT RUNNING";
-			isPaused = false;
+			{
+				std::lock_guard<std::mutex> statusLock(m_statusMutex);
+				currentStatus = "NOT RUNNING";
+				isPaused = false;
+			}
+
 			std::string tmsg = "ACT=RESET_SIM;mid=" + manikin_id;
 			Server::SendToAll(tmsg);
+
 			AMM::SimulationControl simControl;
 			auto ms = duration_cast<std::chrono::milliseconds>(
 					std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::RESET);
 			mgr->WriteSimulationControl(simControl);
+
 			InitializeLabNodes();
-			// } else if (value.find("PUBLISH_ASSESSMENT") != std::string::npos) {
-			//     LOG_INFO << "Command to publish assessments: " << value;
 		} else if (value.find("RESTART_SERVICE") != std::string::npos) {
 			if (mid == parentId || !podMode) {
 				std::string service = ExtractServiceFromCommand(value);
@@ -797,31 +1064,38 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 				MakeSecondary();
 			}
 		} else if (value.find("END_SIMULATION") != std::string::npos) {
-			currentStatus = "NOT RUNNING";
-			isPaused = true;
+			{
+				std::lock_guard<std::mutex> statusLock(m_statusMutex);
+				currentStatus = "NOT RUNNING";
+				isPaused = true;
+			}
+
 			AMM::SimulationControl simControl;
 			auto ms = duration_cast<std::chrono::milliseconds>(
 					std::chrono::system_clock::now().time_since_epoch()).count();
 			simControl.timestamp(ms);
 			simControl.type(AMM::ControlType::HALT);
 			mgr->WriteSimulationControl(simControl);
+
 			std::string tmsg = "ACT=END_SIMULATION_SIM;mid=" + manikin_id;
 			Server::SendToAll(tmsg);
-		} else if (value.find("ENABLE_REMOTE") != std::string::npos) {
+		}
+		else if (value.find("ENABLE_REMOTE") != std::string::npos) {
 			std::string remoteData = value.substr(sizeof("ENABLE_REMOTE"));
 			LOG_INFO << "Enabling remote with options:" << remoteData;
-			std::list <std::string> tokenList;
-			split(tokenList, remoteData, boost::algorithm::is_any_of(";"), boost::token_compress_on);
-			std::map <std::string, std::string> kvp;
 
-			BOOST_FOREACH(std::string
-			token, tokenList) {
+			// Parse the options - no locks needed for this
+			std::list<std::string> tokenList;
+			split(tokenList, remoteData, boost::algorithm::is_any_of(";"), boost::token_compress_on);
+			std::map<std::string, std::string> kvp;
+
+			for (const std::string& token : tokenList) {
 				size_t sep_pos = token.find_first_of('=');
+				if (sep_pos == std::string::npos) continue;
+
 				std::string kvp_key = token.substr(0, sep_pos);
 				boost::algorithm::to_lower(kvp_key);
-				std::string kvp_value = (sep_pos == std::string::npos ? "" : token.substr(
-						sep_pos + 1,
-						std::string::npos));
+				std::string kvp_value = token.substr(sep_pos + 1, std::string::npos);
 				kvp[kvp_key] = kvp_value;
 				LOG_DEBUG << "\t" << kvp_key << " => " << kvp[kvp_key];
 			}
@@ -857,19 +1131,20 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 		} else if (value.find("UPDATE_CLIENT") != std::string::npos) {
 			std::string clientData = value.substr(sizeof("UPDATE_CLIENT"));
 			LOG_DEBUG << "Updating client with client data:" << clientData;
-			std::list <std::string> tokenList;
-			split(tokenList, clientData, boost::algorithm::is_any_of(";"), boost::token_compress_on);
-			std::map <std::string, std::string> kvp;
 
-			BOOST_FOREACH(std::string
-			token, tokenList) {
+			// Parse the client data - this doesn't require locks
+			std::list<std::string> tokenList;
+			split(tokenList, clientData, boost::algorithm::is_any_of(";"), boost::token_compress_on);
+			std::map<std::string, std::string> kvp;
+
+			for (const std::string& token : tokenList) {
 				size_t sep_pos = token.find_first_of('=');
+				if (sep_pos == std::string::npos) continue;
+
 				std::string kvp_key = token.substr(0, sep_pos);
 				boost::algorithm::to_lower(kvp_key);
-				std::string kvp_value = (sep_pos == std::string::npos ? "" : token.substr(
-						sep_pos + 1,
-						std::string::npos));
-				kvp[kvp_key] = value;
+				std::string kvp_value = token.substr(sep_pos + 1, std::string::npos);
+				kvp[kvp_key] = kvp_value;
 				LOG_TRACE << "\t" << kvp_key << " => " << kvp[kvp_key];
 			}
 
@@ -881,7 +1156,9 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 				return;
 			}
 
+			// Get the current game client data
 			ConnectionData gc = GetGameClient(client_id);
+
 			gc.client_id = client_id;
 			if (kvp.find("client_name") != kvp.end()) {
 				gc.client_name = kvp["client_name"];
@@ -906,32 +1183,60 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 			}
 
 			UpdateGameClient(client_id, gc);
+
 			std::ostringstream messageOut;
 			messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
 			Server::SendToAll(messageOut.str());
 		} else if (value.find("KICK") != std::string::npos) {
 			std::string kickC = value.substr(sizeof("KICK"));
 			LOG_INFO << "Got kick via DDS bus command.";
-			for (auto it = gameClientList.cbegin(), next_it = it; it != gameClientList.cend(); it = next_it) {
-				++next_it;
-				std::string cl = it->first;
-				ConnectionData cd = it->second;
-				if (kickC == cl) {
-					LOG_INFO << "Found client, we're removing: " << cd.client_name;
-					gameClientList.erase(it);
-				}
 
+			// Create a copy of the client to kick
+			std::string clientToKick;
+			std::string clientName;
+
+			{
+				std::lock_guard<std::mutex> lock(gcMapMutex);
+				for (auto it = gameClientList.begin(); it != gameClientList.end(); ++it) {
+					if (it->first == kickC) {
+						clientToKick = it->first;
+						clientName = it->second.client_name;
+						break;
+					}
+				}
+			}
+
+			// Remove the client if found
+			if (!clientToKick.empty()) {
+				LOG_INFO << "Found client, we're removing: " << clientName;
+
+				{
+					std::lock_guard<std::mutex> lock(gcMapMutex);
+					gameClientList.erase(clientToKick);
+				}
 			}
 		} else if (!value.compare(0, loadScenarioPrefix.size(), loadScenarioPrefix)) {
-			currentScenario = value.substr(loadScenarioPrefix.size());
-			LOG_DEBUG << "Setting scenario: " << currentScenario;
-			sendConfigToAll(currentScenario);
+			std::string newScenario = value.substr(loadScenarioPrefix.size());
+			LOG_DEBUG << "Setting scenario: " << newScenario;
+
+			{
+				std::lock_guard<std::mutex> statusLock(m_statusMutex);
+				currentScenario = newScenario;
+			}
+
+			sendConfigToAll(newScenario);
 			std::ostringstream messageOut;
 			messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
 			LOG_DEBUG << "Sending " << messageOut.str() << " to all TCP clients.";
 			Server::SendToAll(messageOut.str());
 		} else if (!value.compare(0, loadPrefix.size(), loadPrefix)) {
-			currentState = value.substr(loadStatePrefix.size());
+			std::string newState = value.substr(loadStatePrefix.size());
+
+			{
+				std::lock_guard<std::mutex> statusLock(m_statusMutex);
+				currentState = newState;
+			}
+
 			LOG_DEBUG << "Current state is " << loadStatePrefix;
 			std::ostringstream messageOut;
 			messageOut << "ACT" << "=" << c.message() << ";mid=" << manikin_id << std::endl;
@@ -963,7 +1268,18 @@ bool Manikin::isAuthorized() {
 void Manikin::PublishSettings(std::string const &equipmentType) {
 	std::ostringstream payload;
 	LOG_INFO << "Publishing equipment " << equipmentType << " settings";
-	for (auto &inner_map_pair: equipmentSettings[equipmentType]) {
+
+	std::map<std::string, std::string> settingsCopy;
+
+	{
+		std::lock_guard<std::mutex> settingsLock(m_equipmentSettingsMutex);
+		auto it = equipmentSettings.find(equipmentType);
+		if (it != equipmentSettings.end()) {
+			settingsCopy = it->second;
+		}
+	}
+
+	for (auto &inner_map_pair: settingsCopy) {
 		payload << inner_map_pair.first << "=" << inner_map_pair.second
 		        << std::endl;
 		LOG_DEBUG << "\t" << inner_map_pair.first << ": " << inner_map_pair.second;
@@ -983,6 +1299,7 @@ void Manikin::HandleSettings(Client *c, std::string const &settingsVal) {
 	tinyxml2::XMLElement *module = root->FirstChildElement("module");
 	tinyxml2::XMLElement *caps =
 			module->FirstChildElement("capabilities");
+
 	if (caps) {
 		for (tinyxml2::XMLNode *node =
 				caps->FirstChildElement("capability");
@@ -991,18 +1308,25 @@ void Manikin::HandleSettings(Client *c, std::string const &settingsVal) {
 			std::string capabilityName = cap->Attribute("name");
 			tinyxml2::XMLElement *configEl =
 					cap->FirstChildElement("configuration");
+
 			if (configEl) {
-				for (tinyxml2::XMLNode *settingNode =
-						configEl->FirstChildElement("setting");
-				     settingNode; settingNode = settingNode->NextSibling()) {
-					tinyxml2::XMLElement *setting = settingNode->ToElement();
-					std::string settingName = setting->Attribute("name");
-					std::string settingValue = setting->Attribute("value");
-					equipmentSettings[capabilityName][settingName] =
-							settingValue;
+				// Store settings with proper locking
+				{
+					std::lock_guard<std::mutex> settingsLock(m_equipmentSettingsMutex);
+					for (tinyxml2::XMLNode *settingNode =
+							configEl->FirstChildElement("setting");
+					     settingNode; settingNode = settingNode->NextSibling()) {
+						tinyxml2::XMLElement *setting = settingNode->ToElement();
+						std::string settingName = setting->Attribute("name");
+						std::string settingValue = setting->Attribute("value");
+						equipmentSettings[capabilityName][settingName] =
+								settingValue;
+					}
 				}
+
+				// Publish after updating settings
+				PublishSettings(capabilityName);
 			}
-			PublishSettings(capabilityName);
 		}
 	}
 }
@@ -1039,46 +1363,50 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 	// Set the client's type
 	c->SetClientType(nodeName);
 
-	std::lock_guard <std::mutex> lock(m_mapmutex);
-	try {
-		clientTypeMap.insert({c->id, nodeName});
-	} catch (exception &e) {
-		LOG_ERROR << "Unable to insert into clientTypeMap: " << e.what();
+	{
+		std::lock_guard<std::mutex> lock(m_mapmutex);
+		try {
+			clientTypeMap.insert({c->id, nodeName});
+		} catch (exception &e) {
+			LOG_ERROR << "Unable to insert into clientTypeMap: " << e.what();
+		}
 	}
 
-	subscribedTopics[c->id].clear();
-	publishedTopics[c->id].clear();
+	{
+		std::lock_guard<std::mutex> topicLock(m_topicMutex);
+		subscribedTopics[c->id].clear();
+		publishedTopics[c->id].clear();
+	}
 
 	ConnectionData gc = GetGameClient(c->id);
 	gc.client_type = nodeName;
 	UpdateGameClient(c->id, gc);
 
-	tinyxml2::XMLElement *caps =
-			module->FirstChildElement("capabilities");
+	tinyxml2::XMLElement *caps = module->FirstChildElement("capabilities");
 	if (caps) {
 		for (tinyxml2::XMLNode *node = caps->FirstChildElement("capability"); node; node = node->NextSibling()) {
 			tinyxml2::XMLElement *cap = node->ToElement();
 			std::string capabilityName = cap->Attribute("name");
-			tinyxml2::XMLElement *starting_settings =
-					cap->FirstChildElement("starting_settings");
+			tinyxml2::XMLElement *starting_settings = cap->FirstChildElement("starting_settings");
+
 			if (starting_settings) {
-				for (tinyxml2::XMLNode *settingNode =
-						starting_settings->FirstChildElement("setting");
-				     settingNode; settingNode = settingNode->NextSibling()) {
-					tinyxml2::XMLElement *setting = settingNode->ToElement();
-					std::string settingName = setting->Attribute("name");
-					std::string settingValue = setting->Attribute("value");
-					equipmentSettings[capabilityName][settingName] =
-							settingValue;
+				{
+					std::lock_guard<std::mutex> settingsLock(m_equipmentSettingsMutex);
+					for (tinyxml2::XMLNode *settingNode = starting_settings->FirstChildElement("setting");
+					     settingNode; settingNode = settingNode->NextSibling()) {
+						tinyxml2::XMLElement *setting = settingNode->ToElement();
+						std::string settingName = setting->Attribute("name");
+						std::string settingValue = setting->Attribute("value");
+						equipmentSettings[capabilityName][settingName] = settingValue;
+					}
 				}
 				PublishSettings(capabilityName);
 			}
 
-			tinyxml2::XMLNode *subs =
-					node->FirstChildElement("subscribed_topics");
+			tinyxml2::XMLNode *subs = node->FirstChildElement("subscribed_topics");
 			if (subs) {
-				for (tinyxml2::XMLNode *sub =
-						subs->FirstChildElement("topic");
+				std::lock_guard<std::mutex> topicLock(m_topicMutex);
+				for (tinyxml2::XMLNode *sub = subs->FirstChildElement("topic");
 				     sub; sub = sub->NextSibling()) {
 					tinyxml2::XMLElement *sE = sub->ToElement();
 					std::string subTopicName = sE->Attribute("name");
@@ -1091,24 +1419,19 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 							subTopicName = subNodePath;
 						}
 					}
-					std::lock_guard <std::mutex> lock(m_topicmutex);
 					Utility::add_once(subscribedTopics[c->id], subTopicName);
-					// LOG_TRACE << "[" << capabilityName << "][" << c->id << "] Subscribing to " << subTopicName;
 				}
 			}
 
 			// Store published topics for this capability
-			tinyxml2::XMLNode *pubs =
-					node->FirstChildElement("published_topics");
+			tinyxml2::XMLNode *pubs = node->FirstChildElement("published_topics");
 			if (pubs) {
-				for (tinyxml2::XMLNode *pub =
-						pubs->FirstChildElement("topic");
+				std::lock_guard<std::mutex> topicLock(m_topicMutex);
+				for (tinyxml2::XMLNode *pub = pubs->FirstChildElement("topic");
 				     pub; pub = pub->NextSibling()) {
 					tinyxml2::XMLElement *p = pub->ToElement();
 					std::string pubTopicName = p->Attribute("name");
-					std::lock_guard <std::mutex> lock(m_topicmutex);
 					Utility::add_once(publishedTopics[c->id], pubTopicName);
-					// LOG_TRACE << "[" << capabilityName << "][" << c->id << "] Publishing " << pubTopicName;
 				}
 			}
 		}
@@ -1137,61 +1460,6 @@ void Manikin::HandleStatus(Client *c, std::string const &statusVal) {
 	mgr->WriteStatus(status);
 }
 
-void Manikin::DispatchRequest(Client *c, const std::string &request, std::string mid) {
-	if (boost::starts_with(request, "STATUS")) {
-		std::ostringstream messageOut;
-		messageOut << "STATUS=" << currentStatus << "|"
-		           << "SCENARIO=" << currentScenario << "|"
-		           << "STATE=" << currentState << "|";
-
-		Server::SendToClient(c, messageOut.str());
-	} else if (boost::starts_with(request, "CLIENTS")) {
-		LOG_DEBUG << "Client table request";
-
-		std::ostringstream messageOut;
-		messageOut
-				<< "client_id,client_name,learner_name,client_connection,client_type,role,client_status,connect_time\n";
-
-		for (const auto &client: gameClientList) {
-			const ConnectionData &clientData = client.second;
-			messageOut << clientData.client_id << ","
-			           << clientData.client_name << ","
-			           << clientData.learner_name << ","
-			           << clientData.client_connection << ","
-			           << clientData.client_type << ","
-			           << clientData.role << ","
-			           << clientData.client_status << ","
-			           << clientData.connect_time << "\n";
-		}
-
-		Server::SendToClient(c, messageOut.str());
-	} else if (boost::starts_with(request, "LABS")) {
-		LOG_DEBUG << "LABS request: " << request;
-
-		const auto delimiterIdx = request.find_first_of(';');
-		const std::string labCategory = (delimiterIdx != std::string::npos)
-		                                ? request.substr(delimiterIdx + 1)
-		                                : "ALL";
-
-		LOG_DEBUG << "Return lab values for: " << labCategory;
-
-		const auto &labValues = labNodes[labCategory];
-		if (labValues.empty()) {
-			LOG_WARNING << "No lab values found for category: " << labCategory;
-			return;
-		}
-
-		for (const auto &lab: labValues) {
-			std::ostringstream messageOut;
-			messageOut << lab.first << "=" << lab.second << ";mid=" << mid << "|";
-			Server::SendToClient(c, messageOut.str());
-		}
-	} else {
-		LOG_WARNING << "Unknown request type: " << request;
-	}
-}
-
-
 void Manikin::PublishOperationalDescription() {
 	AMM::OperationalDescription od;
 	od.name(moduleName);
@@ -1218,7 +1486,8 @@ void Manikin::PublishConfiguration() {
 }
 
 void Manikin::InitializeLabNodes() {
-	//
+	std::lock_guard<std::mutex> labLock(m_labMutex);
+
 	labNodes["ALL"]["Substance_Sodium"] = 0.0f;
 	labNodes["ALL"]["MetabolicPanel_CarbonDioxide"] = 0.0f;
 	labNodes["ALL"]["Substance_Glucose_Concentration"] = 0.0f;

@@ -1,14 +1,24 @@
-#pragma once
+#ifndef SERVER_H
+#define SERVER_H
 
-#include <iostream>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <mutex>
 #include <thread>
-
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <sys/socket.h>
+#include <atomic>
+#include <chrono>
+#include <memory>
 
 #include "amm/BaseLogger.h"
 
@@ -17,33 +27,40 @@
 
 class Server {
 public:
-	explicit Server(int port);
+	Server(int port);
+	~Server(); // Add this line to declare the destructor
 
-	// Core server operations
 	void AcceptAndDispatch();
-	static void* HandleClient(void* args);
+	static void* HandleClient(void*);
 
-	// Client operations
-	static void SendToAll(const std::string& message);
-	static void SendToClient(Client* client, const std::string& message);
-	static Client* GetClientByIndex(const std::string& id);
-	static int FindClientIndex(Client* client);
-	static void RemoveClient(Client* client);
-
-	static std::mutex clientsMutex;
-
-private:
-	// Utility and internal operations
-	static void ListClients();
+	static void SendToAll(std::string const& message);
 	static void SendToAll(char* message);
+	static void SendToClient(Client* client, std::string const& message);
 
-	// Member variables
-	int serverSock;
-	struct sockaddr_in serverAddr, clientAddr;
+	static void ListClients();
+	static void RemoveClient(Client* client);
+	static int FindClientIndex(Client* client);
+	static Client* GetClientByIndex(std::string const& id);
+	static void CreateClient(Client* c, std::string& uuid);
+
+	static std::vector<Client*> clients;
+	static std::mutex clientsMutex;
+	static std::mutex sendMutex;
 	bool m_runThread;
 
-	// Static shared resources
-	static std::vector<Client> clients;
+private:
+	int serverSock;
+	struct sockaddr_in serverAddr;
+	struct sockaddr_in clientAddr;
 
-	static void CreateClient(Client *c, string &uuid);
+	std::vector<std::unique_ptr<ServerThread>> clientThreads;
+	std::mutex threadsMutex;
+	void CleanupCompletedThreads();
+
+	// Add a thread monitor method
+	void MonitorThreads();
+	std::atomic<bool> monitorRunning{false};
+	std::unique_ptr<std::thread> monitorThread;
 };
+
+#endif // SERVER_H

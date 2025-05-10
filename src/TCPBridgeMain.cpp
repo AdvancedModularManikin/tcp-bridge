@@ -24,13 +24,13 @@ using namespace eprosima::fastrtps::rtps;
 
 Server *s;
 
-std::map <std::string, std::string> clientMap;
-std::map <std::string, std::string> clientTypeMap;
+std::map<std::string, std::string> clientMap;
+std::map<std::string, std::string> clientTypeMap;
 
-std::map <std::string, std::vector<std::string>> subscribedTopics;
-std::map <std::string, std::vector<std::string>> publishedTopics;
-std::map <std::string, ConnectionData> gameClientList;
-std::map <std::string, std::string> globalInboundBuffer;
+std::map<std::string, std::vector<std::string>> subscribedTopics;
+std::map<std::string, std::vector<std::string>> publishedTopics;
+std::map<std::string, ConnectionData> gameClientList;
+std::map<std::string, std::string> globalInboundBuffer;
 
 std::string DEFAULT_MANIKIN_ID = "manikin_1";
 std::string CORE_ID;
@@ -39,40 +39,16 @@ std::string SESSION_PASSWORD;
 const string capabilityPrefix = "CAPABILITY=";
 const string settingsPrefix = "SETTINGS=";
 const string statusPrefix = "STATUS=";
-const string configPrefix = "CONFIG=";
-const string modulePrefix = "MODULE_NAME=";
 const string registerPrefix = "REGISTER=";
 const string kickPrefix = "KICK=";
 const string requestPrefix = "REQUEST=";
-const string keepHistoryPrefix = "KEEP_HISTORY=";
 const string actionPrefix = "ACT=";
 const string genericTopicPrefix = "[";
 const string keepAlivePrefix = "[KEEPALIVE]";
-const string loadScenarioPrefix = "LOAD_SCENARIO:";
-const string loadStatePrefix = "LOAD_STATE:";
-const string haltingString = "HALTING_ERROR";
-const string sysPrefix = "[SYS]";
-const string actPrefix = "[ACT]";
-const string loadPrefix = "LOAD_STATE:";
 
 std::mutex Server::clientsMutex;
 
 TPMS pod;
-
-std::string ExtractManikinIDFromString(std::string in) {
-	std::size_t pos = in.find("mid=");
-	if (pos != std::string::npos) {
-		std::string mid1 = in.substr(pos + 4);
-		std::size_t pos1 = mid1.find(";");
-		if (pos1 != std::string::npos) {
-			std::string mid2 = mid1.substr(0, pos1);
-			return mid2;
-		}
-		return mid1;
-	}
-	return DEFAULT_MANIKIN_ID;
-}
-
 
 void broadcastDisconnection(const ConnectionData &gc) {
 	std::ostringstream message;
@@ -92,25 +68,56 @@ void broadcastDisconnection(const ConnectionData &gc) {
 	}
 }
 
+
 void handleClientDisconnection(Client *c) {
-	// Update game client status to DISCONNECTED
-	ConnectionData gc = GetGameClient(c->id);
-	gc.client_status = "DISCONNECTED";
-	UpdateGameClient(c->id, gc);
-	broadcastDisconnection(gc);
+	if (!c) return;  // Safety check
 
-	{
-		std::lock_guard<std::mutex> lock(Server::clientsMutex);
-		clientMap.erase(c->id);
-		globalInboundBuffer.erase(c->id);
+	try {
+		// Update game client status to DISCONNECTED
+		ConnectionData gc = GetGameClient(c->id);
+		gc.client_status = "DISCONNECTED";
+		UpdateGameClient(c->id, gc);
 
-		// Clean up topic subscriptions
-		subscribedTopics.erase(c->id);
-		publishedTopics.erase(c->id);
+		try {
+			broadcastDisconnection(gc);
+		} catch (const std::exception &e) {
+			LOG_ERROR << "Error broadcasting disconnection: " << e.what();
+			// Continue with cleanup regardless
+		}
+
+		{
+			std::lock_guard<std::mutex> lock(Server::clientsMutex);
+			clientMap.erase(c->id);
+			globalInboundBuffer.erase(c->id);
+
+			// Clean up topic subscriptions
+			subscribedTopics.erase(c->id);
+			publishedTopics.erase(c->id);
+		}
+
+		// Safe socket shutdown
+		shutdown(c->sock, SHUT_RDWR);
+		close(c->sock);
+
+		// Remove from server's client list
+		Server::RemoveClient(c);
+
+		// Finally delete the client object
+		delete c;
+
+	} catch (const std::exception &e) {
+		LOG_ERROR << "Exception in handleClientDisconnection: " << e.what();
+
+		// Last-resort cleanup
+		try {
+			close(c->sock);
+			delete c;
+		} catch (...) {
+			LOG_ERROR << "Fatal error during last-resort client cleanup";
+		}
 	}
-
-	Server::RemoveClient(c);
 }
+
 
 // Handler for client registration
 void handleRegisterMessage(Client *c, const std::string &message) {
@@ -226,16 +233,15 @@ void handleActionMessage(Client *c, const std::string &message) {
 	std::string action = message.substr(actionPrefix.size());
 	LOG_INFO << "Client " << c->id << " sent action: " << action;
 
-	// Broadcast action as an AMM Command
 	AMM::Command cmdInstance;
 	cmdInstance.message(action);
 	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
 	if (tmgr) tmgr->mgr->WriteCommand(cmdInstance);
 }
 
-void parseKeyValuePairs(const std::string &message, std::map <std::string, std::string> &kvp) {
+void parseKeyValuePairs(const std::string &message, std::map<std::string, std::string> &kvp) {
 	// Split the message into tokens based on semicolons
-	std::vector <std::string> tokens;
+	std::vector<std::string> tokens;
 	boost::split(tokens, message, boost::is_any_of(";"), boost::token_compress_on);
 
 	// Process each token to extract key-value pairs
@@ -264,8 +270,6 @@ void parseKeyValuePairs(const std::string &message, std::map <std::string, std::
 		}
 	}
 }
-
-
 
 // Handler for physiological and render modifications
 void handleModificationMessage(Client *c, const std::string &message, const std::string &topic) {
@@ -298,18 +302,18 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	std::string modPayload = kvp["payload"];
 
 	if (modType.empty()) {
-	  modType = ExtractTypeFromRenderMod(modPayload);
+		modType = ExtractTypeFromRenderMod(modPayload);
 	}
-	
+
 	if (topic == "AMM_Render_Modification") {
-	  tmgr->SendEventRecord(erID, fma, agentID, modType);
-	  if (modPayload.empty()) { // make a render mod payload
-	      std::ostringstream tPayload;
-	      tPayload << "<RenderModification type='" << modType << "'/>";	      
-	      tmgr->SendRenderModification(erID, modType, tPayload.str());
-	    } else {	      	      
-	      tmgr->SendRenderModification(erID, modType, modPayload);
-	    }
+		tmgr->SendEventRecord(erID, fma, agentID, modType);
+		if (modPayload.empty()) { // make a render mod payload
+			std::ostringstream tPayload;
+			tPayload << "<RenderModification type='" << modType << "'/>";
+			tmgr->SendRenderModification(erID, modType, tPayload.str());
+		} else {
+			tmgr->SendRenderModification(erID, modType, modPayload);
+		}
 	} else if (topic == "AMM_Physiology_Modification") {
 		tmgr->SendEventRecord(erID, fma, agentID, modType);
 		tmgr->SendPhysiologyModification(erID, modType, modPayload);
@@ -360,7 +364,7 @@ void processClientMessage(Client *c, const std::string &message) {
 		} else {
 			LOG_ERROR << "Malformed generic topic message from client " << c->id << ": " << message;
 		}
-	} else if (message.find(" Connected") == 0) {
+	} else if (message.find(" Connected") != std::string::npos) {
 		LOG_INFO << "Module connection message: " << message;
 	} else {
 		// Log an unknown or unsupported message type
@@ -372,113 +376,200 @@ void *Server::HandleClient(void *args) {
 	auto *c = static_cast<Client *>(args);
 	if (!c) return nullptr;
 
-	char buffer[8192 - 25];
-	ssize_t n;
-	std::string uuid = gen_random(10);
+	try {
+		char buffer[8192 - 25];
+		ssize_t n;
+		std::string uuid = gen_random(10);
 
-	// Mutex management and client setup
-	CreateClient(c, uuid);
+		// Create a scope for better resource management
+		{
+			// Mutex management and client setup
+			CreateClient(c, uuid);
 
-	clientMap[c->id] = uuid;
+			clientMap[c->id] = uuid;
 
-	// Initialize game client data
-	auto gc = GetGameClient(c->id);
-	gc.client_id = c->id;
-	gc.client_connection = "TCP";
-	gc.connect_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-	UpdateGameClient(c->id, gc);
+			// Initialize game client data
+			auto gc = GetGameClient(c->id);
+			gc.client_id = c->id;
+			gc.client_connection = "TCP";
+			gc.connect_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+			UpdateGameClient(c->id, gc);
 
-	// Set socket to non-blocking
-	int flags = fcntl(c->sock, F_GETFL, 0);
-	fcntl(c->sock, F_SETFL, flags | O_NONBLOCK);
+			// Set socket to non-blocking only - don't use SO_RCVTIMEO/SO_SNDTIMEO
+			int flags = fcntl(c->sock, F_GETFL, 0);
+			fcntl(c->sock, F_SETFL, flags | O_NONBLOCK);
 
-	struct timeval tv;
-	tv.tv_sec = 10;  // 10 second timeout
-	tv.tv_usec = 0;
-	setsockopt(c->sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
-	setsockopt(c->sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
+			// Ensure TCP keepalive is enabled to detect dead peers
+			int keepalive = 1;
+			int keepidle = 60; // Start probing after 60 seconds of inactivity
+			int keepintvl = 10; // Send probes every 10 seconds
+			int keepcnt = 6;   // Consider connection dead after 6 failed probes
 
-	while (true) {
-		memset(buffer, 0, sizeof(buffer));
+			setsockopt(c->sock, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive));
 
-		// Use select() to wait for data with timeout
-		fd_set readfds;
-		FD_ZERO(&readfds);
-		FD_SET(c->sock, &readfds);
+			// These might not be available on all platforms
+#ifdef TCP_KEEPIDLE
+			setsockopt(c->sock, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
+#endif
 
-		// Set timeout for select
-		struct timeval timeout;
-		timeout.tv_sec = 5;  // 5 second timeout
-		timeout.tv_usec = 0;
+#ifdef TCP_KEEPINTVL
+			setsockopt(c->sock, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl));
+#endif
 
-		int activity = select(c->sock + 1, &readfds, NULL, NULL, &timeout);
+#ifdef TCP_KEEPCNT
+			setsockopt(c->sock, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
+#endif
 
-		if (activity < 0) {
-			LOG_ERROR << "Select error for client " << c->id << ": " << strerror(errno);
-			if (errno != EINTR) {
-				break;
-			}
-			continue;
-		}
+			// Variables for detecting client inactivity
+			auto lastActivity = std::chrono::steady_clock::now();
+			const auto maxInactivityDuration = std::chrono::minutes(10); // 10 minutes timeout
 
-		// No data available within timeout
-		if (activity == 0) {
-			// Optional: send keep-alive ping
-			continue;
-		}
+			bool clientActive = true;
+			while (clientActive) {
+				memset(buffer, 0, sizeof(buffer));
 
-		// Read data if available
-		if (FD_ISSET(c->sock, &readfds)) {
-			n = recv(c->sock, buffer, sizeof(buffer), 0);
+				// Use select() to wait for data with timeout
+				fd_set readfds;
+				FD_ZERO(&readfds);
+				FD_SET(c->sock, &readfds);
 
-			// Check if client disconnected
-			if (n == 0) {
-				LOG_INFO << c->name << " disconnected";
-				handleClientDisconnection(c);
-				break;
-			} else if (n < 0) {
-				if (errno == EAGAIN || errno == EWOULDBLOCK) {
-					// No data available, not an error
+				// Set timeout for select - shorter timeout allows us to check connection health
+				struct timeval timeout;
+				timeout.tv_sec = 30;  // 30 second timeout
+				timeout.tv_usec = 0;
+
+				int activity = select(c->sock + 1, &readfds, NULL, NULL, &timeout);
+
+				auto now = std::chrono::steady_clock::now();
+				auto inactivityDuration = now - lastActivity;
+
+				// Check if client has been inactive for too long
+				if (inactivityDuration > maxInactivityDuration) {
+					LOG_WARNING << "Client " << c->id << " inactive for too long, disconnecting";
+					clientActive = false;
+					break;
+				}
+
+				if (activity < 0) {
+					if (errno == EINTR) {
+						// Interrupted, just continue
+						continue;
+					}
+
+					LOG_ERROR << "Select error for client " << c->id << ": " << strerror(errno);
+					clientActive = false;
+					break;
+				}
+
+				// No data available within timeout
+				if (activity == 0) {
+					// Send keepalive message to check connection
+					std::string keepaliveMsg = "[KEEPALIVE]\n";
+					if (send(c->sock, keepaliveMsg.c_str(), keepaliveMsg.length(), 0) < 0) {
+						if (errno != EAGAIN && errno != EWOULDBLOCK) {
+							LOG_ERROR << "Error sending keepalive to client " << c->id << ": " << strerror(errno);
+							clientActive = false;
+							break;
+						}
+					}
 					continue;
 				}
-				LOG_ERROR << "Error while receiving message from client: " << c->name << ": " << strerror(errno);
-				handleClientDisconnection(c);
-				break;
-			}
 
-			// Process received message
-			std::string tempBuffer(buffer);
-			globalInboundBuffer[c->id] += tempBuffer;
+				// Read data if available
+				if (FD_ISSET(c->sock, &readfds)) {
+					lastActivity = now; // Update last activity time
 
-			if (!boost::algorithm::ends_with(globalInboundBuffer[c->id], "\n")) {
-				continue;
-			}
+					// Use non-blocking recv - it will not block since select indicated data is ready
+					n = recv(c->sock, buffer, sizeof(buffer), 0);
 
-			auto messages = Utility::explode("\n", globalInboundBuffer[c->id]);
-			globalInboundBuffer[c->id].clear();
+					// Check if client disconnected
+					if (n == 0) {
+						LOG_INFO << c->name << " disconnected";
+						clientActive = false;
+						break;
+					} else if (n < 0) {
+						if (errno == EAGAIN || errno == EWOULDBLOCK) {
+							// No data available - this shouldn't happen after select(), but just in case
+							continue;
+						}
+						LOG_ERROR << "Error while receiving message from client: " << c->name << ": "
+						          << strerror(errno);
+						clientActive = false;
+						break;
+					}
 
-			for (auto &message: messages) {
-				boost::trim(message);
-				if (message.empty()) continue;
+					// Process received message
+					std::string tempBuffer(buffer);
+					globalInboundBuffer[c->id] += tempBuffer;
 
-				try {
-					processClientMessage(c, message);
-				} catch (std::exception &e) {
-					LOG_ERROR << "Exception while processing client message: " << e.what();
+					if (!boost::algorithm::ends_with(globalInboundBuffer[c->id], "\n")) {
+						continue;
+					}
+
+					auto messages = Utility::explode("\n", globalInboundBuffer[c->id]);
+					globalInboundBuffer[c->id].clear();
+
+					for (auto &message: messages) {
+						boost::trim(message);
+						if (message.empty()) continue;
+
+						try {
+							processClientMessage(c, message);
+							lastActivity = std::chrono::steady_clock::now(); // Update activity time after successful processing
+						} catch (std::exception &e) {
+							LOG_ERROR << "Exception while processing client message: " << e.what();
+							// Continue processing other messages despite error
+						}
+					}
 				}
+			}
+		}
+
+		// Clean up resources when we exit the loop
+		handleClientDisconnection(c);
+
+	} catch (const std::exception &e) {
+		LOG_ERROR << "Exception in HandleClient: " << e.what();
+
+		// Ensure client is disconnected and cleaned up
+		try {
+			handleClientDisconnection(c);
+		} catch (const std::exception &cleanup_e) {
+			LOG_ERROR << "Exception during cleanup: " << cleanup_e.what();
+
+			// Last-resort cleanup
+			try {
+				std::lock_guard<std::mutex> lock(Server::clientsMutex);
+				clientMap.erase(c->id);
+				globalInboundBuffer.erase(c->id);
+				subscribedTopics.erase(c->id);
+				publishedTopics.erase(c->id);
+
+				Server::RemoveClient(c);
+				close(c->sock);
+				delete c;
+			} catch (...) {
+				LOG_ERROR << "Fatal error during client cleanup for client " << c->id;
+			}
+		}
+	} catch (...) {
+		LOG_ERROR << "Unknown exception in HandleClient";
+
+		// Try to clean up even in case of unknown exception
+		try {
+			handleClientDisconnection(c);
+		} catch (...) {
+			// Last-resort cleanup
+			try {
+				close(c->sock);
+				delete c;
+			} catch (...) {
+				LOG_ERROR << "Fatal error during client cleanup";
 			}
 		}
 	}
-	return nullptr;
-}
 
-void Server::CreateClient(Client *c, string &uuid) {
-	std::lock_guard<std::mutex> lock(clientsMutex);
-	c->SetId(uuid);
-	string defaultName = "Client " + c->id;
-	c->SetName(defaultName);
-	clients.push_back(*c);
-	LOG_DEBUG << "Adding client with id: " << c->id;
+	return nullptr;
 }
 
 
@@ -494,7 +585,7 @@ void UdpDiscoveryThread(short port, bool enabled, std::string manikin_id) {
 }
 
 int main(int argc, const char *argv[]) {
-	static plog::ColorConsoleAppender <plog::TxtFormatter> consoleAppender;
+	static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
 	plog::init(plog::verbose, &consoleAppender);
 
 	short discoveryPort = 8888;
