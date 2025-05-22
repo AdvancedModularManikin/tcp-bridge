@@ -2,17 +2,11 @@
 #include "Net/Client.h"
 #include "Net/Server.h"
 #include "Net/UdpDiscoveryServer.h"
-
 #include "amm_std.h"
-
 #include "amm/BaseLogger.h"
-
 #include "bridge.h"
-
 #include "TPMS.h"
-
 #include "tinyxml2.h"
-
 
 using namespace std;
 using namespace tinyxml2;
@@ -22,7 +16,7 @@ using namespace std::chrono;
 using namespace eprosima::fastdds::dds;
 using namespace eprosima::fastrtps::rtps;
 
-Server *s;
+std::unique_ptr<Server> s;
 
 std::map<std::string, std::string> clientMap;
 std::map<std::string, std::string> clientTypeMap;
@@ -49,6 +43,7 @@ const string keepAlivePrefix = "[KEEPALIVE]";
 std::mutex Server::clientsMutex;
 
 TPMS pod;
+
 
 void broadcastDisconnection(const ConnectionData &gc) {
 	std::ostringstream message;
@@ -651,7 +646,7 @@ int main(int argc, const char *argv[]) {
 	}
 
 	std::thread t1(UdpDiscoveryThread, discoveryPort, discovery, manikinId);
-	s = new Server(bridgePort);
+	s = std::make_unique<Server>(bridgePort);
 	std::string action;
 
 	LOG_INFO << "TCP Bridge listening on port " << bridgePort;
