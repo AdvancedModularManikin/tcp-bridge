@@ -2,7 +2,6 @@
 
 // Static members
 std::vector<Client *> Server::clients;
-std::mutex Server::sendMutex;
 
 // Constructor
 Server::Server(int port) {
@@ -168,47 +167,62 @@ void Server::SendToClient(Client *client, const std::string &message) {
 	if (!client) return;
 
 	try {
-		// Use a local copy of the client socket to minimize lock time
-		int clientSocket;
-		std::string clientId;
+		// Get socket info without global lock - individual socket operations are thread-safe
+		int clientSocket = client->sock;
+		std::string clientId = client->id;
 
-		{
-			// Short lock just to access the socket
-			std::lock_guard<std::mutex> lock(sendMutex);
-			clientSocket = client->sock;
-			clientId = client->id;
+		// Validate socket is still valid
+		if (clientSocket <= 0) {
+			LOG_WARNING << "Invalid socket for client " << clientId;
+			return;
 		}
 
-		// Use select to check if the socket is writable
+		// Use select with much shorter timeout to check if socket is writable
 		fd_set writefds;
 		FD_ZERO(&writefds);
 		FD_SET(clientSocket, &writefds);
 
 		struct timeval timeout;
-		timeout.tv_sec = 1;  // 1 second timeout for sending
-		timeout.tv_usec = 0;
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 100000;  // 100ms timeout instead of 1 second
 
 		int selectResult = select(clientSocket + 1, NULL, &writefds, NULL, &timeout);
 
 		if (selectResult < 0) {
-			LOG_ERROR << "Select error before sending to client " << clientId << ": " << strerror(errno);
+			if (errno == EBADF) {
+				LOG_INFO << "Bad socket descriptor for client " << clientId << " - cleaning up disconnected client";
+				CleanupDisconnectedClient(client);
+			} else {
+				LOG_ERROR << "Select error before sending to client " << clientId << ": " << strerror(errno);
+			}
 			return;
 		}
 
 		if (selectResult == 0) {
-			// Timeout on select - socket not ready for writing
-			LOG_ERROR << "Timeout waiting for socket to be ready for writing, client " << clientId;
+			// Timeout on select - socket not ready for writing, likely disconnected
+			LOG_INFO << "Socket timeout for client " << clientId << " - cleaning up potentially disconnected client";
+			CleanupDisconnectedClient(client);
 			return;
 		}
 
 		// Socket is ready for writing
 		if (FD_ISSET(clientSocket, &writefds)) {
-			ssize_t sent = send(clientSocket, message.c_str(), message.length(), 0);
+			// Use MSG_DONTWAIT for non-blocking send as additional safety
+			ssize_t sent = send(clientSocket, message.c_str(), message.length(), MSG_DONTWAIT);
 			if (sent < 0) {
-				LOG_ERROR << "Error sending to client " << clientId << ": " << strerror(errno);
+				if (errno == EPIPE || errno == ECONNRESET || errno == ENOTCONN) {
+					LOG_INFO << "Client " << clientId << " disconnected (send failed: " << strerror(errno) << ") - cleaning up";
+					CleanupDisconnectedClient(client);
+				} else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+					LOG_DEBUG << "Send would block for client " << clientId << " - skipping message";
+				} else {
+					LOG_ERROR << "Error sending to client " << clientId << ": " << strerror(errno);
+				}
 			} else if (sent < static_cast<ssize_t>(message.length())) {
 				LOG_WARNING << "Incomplete send to client " << clientId << ": sent " << sent << " of "
 				            << message.length() << " bytes";
+			} else {
+			  // LOG_TRACE << "Successfully sent " << sent << " bytes to client " << clientId;
 			}
 		}
 	} catch (const std::exception &e) {
@@ -217,29 +231,34 @@ void Server::SendToClient(Client *client, const std::string &message) {
 }
 
 void Server::SendToAll(const std::string &message) {
-	// Get a copy of all current client IDs
-	std::vector<std::string> clientIds;
+	// Get a snapshot of all clients to avoid holding lock during sends
+	std::vector<Client*> clientSnapshot;
+	std::vector<Client*> disconnectedClients;
 
 	{
 		std::lock_guard<std::mutex> lock(clientsMutex);
 		for (auto &client: clients) {
 			if (client) {
-				clientIds.push_back(client->id);
+				if (IsClientConnected(client)) {
+					clientSnapshot.push_back(client);
+				} else {
+					disconnectedClients.push_back(client);
+				}
 			}
 		}
 	}
 
-	// Now send to each client by ID without holding the global lock
-	for (const auto &id: clientIds) {
-		Client *client = nullptr;
-
-		// Get the client pointer with a brief lock
-		{
-			std::lock_guard<std::mutex> lock(clientsMutex);
-			client = GetClientByIndex(id);
+	// Clean up any disconnected clients found during the check
+	for (auto* client : disconnectedClients) {
+		if (client) {
+			LOG_INFO << "Removing disconnected client found during SendToAll: " << client->id;
+			CleanupDisconnectedClient(client);
 		}
+	}
 
-		// Send the message if client still exists
+	// Send to each connected client without holding the global lock
+	// Each SendToClient call is now non-blocking and won't affect other clients
+	for (auto* client : clientSnapshot) {
 		if (client) {
 			SendToClient(client, message);
 		}
@@ -282,6 +301,57 @@ void Server::RemoveClient(Client *client) {
 		LOG_ERROR << "Client not found for removal: " << client->id;
 	}
 
+}
+
+// Check if a client is still connected by testing the socket
+bool Server::IsClientConnected(Client *client) {
+	if (!client || client->sock <= 0) {
+		return false;
+	}
+
+	// Use a quick non-blocking recv to check if the socket is still valid
+	char buffer[1];
+	ssize_t result = recv(client->sock, buffer, sizeof(buffer), MSG_DONTWAIT | MSG_PEEK);
+	
+	if (result == 0) {
+		// recv returned 0, which means the connection is closed
+		return false;
+	} else if (result < 0) {
+		// Check the error code
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			// No data available, but connection is still alive
+			return true;
+		} else if (errno == ECONNRESET || errno == ENOTCONN || errno == EBADF) {
+			// Connection is broken
+			return false;
+		}
+		// Other errors - assume connected for safety
+		return true;
+	}
+	
+	// recv returned > 0, connection is alive (put data back with MSG_PEEK)
+	return true;
+}
+
+// Clean up a disconnected client immediately
+void Server::CleanupDisconnectedClient(Client *client) {
+	if (!client) return;
+	
+	LOG_INFO << "Removing disconnected client from active list: " << client->id;
+	
+	try {
+		// Mark the socket as invalid to prevent future send attempts
+		if (client->sock > 0) {
+			client->sock = -1; // Mark as closed to prevent further send attempts
+		}
+		
+		// Remove from the client list - this prevents future SendToAll from trying this client
+		// The actual comprehensive cleanup will happen in the client thread when it detects disconnection
+		RemoveClient(client);
+		
+	} catch (const std::exception &e) {
+		LOG_ERROR << "Exception during client cleanup: " << e.what();
+	}
 }
 
 // Find the index of a client in the list

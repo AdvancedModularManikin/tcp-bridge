@@ -42,10 +42,11 @@ public:
 	static int FindClientIndex(Client* client);
 	static Client* GetClientByIndex(std::string const& id);
 	static void CreateClient(Client* c, std::string& uuid);
+	static bool IsClientConnected(Client* client);
+	static void CleanupDisconnectedClient(Client* client);
 
 	static std::vector<Client*> clients;
 	static std::mutex clientsMutex;
-	static std::mutex sendMutex;
 	bool m_runThread;
 
 private:
