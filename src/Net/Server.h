@@ -24,6 +24,14 @@
 
 #include "Client.h"
 #include "ServerThread.h"
+#include <unordered_map>
+
+// Constants for server configuration
+const int DEFAULT_SERVER_BACKLOG = 30;
+const int DEFAULT_UDP_SELECT_TIMEOUT_SEC = 1;
+const int DEFAULT_SEND_SELECT_TIMEOUT_USEC = 100000; // 100ms
+const int DEFAULT_THREAD_CLEANUP_INTERVAL_SEC = 5;
+const int DEFAULT_ERROR_RETRY_DELAY_MS = 100;
 
 class Server {
 public:
@@ -46,6 +54,7 @@ public:
 	static void CleanupDisconnectedClient(Client* client);
 
 	static std::vector<Client*> clients;
+	static std::unordered_map<std::string, Client*> clientsById; // Fast lookup by ID
 	static std::mutex clientsMutex;
 	bool m_runThread;
 

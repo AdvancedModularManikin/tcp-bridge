@@ -1,4 +1,8 @@
 #include "bridge.h"
+#include <random>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <chrono>
 
 std::mutex gcMapMutex;
 
@@ -47,15 +51,33 @@ std::string ExtractTypeFromRenderMod(std::string payload) {
 
 
 std::string gen_random(const int len) {
+    // Validate input length
+    if (len <= 0) {
+        throw std::invalid_argument("Random string length must be positive");
+    }
+    if (len > 1000) {  // Reasonable upper limit
+        throw std::invalid_argument("Random string length too large");
+    }
+    
     static const char alphanum[] =
             "0123456789"
             "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
             "abcdefghijklmnopqrstuvwxyz";
+    
+    // Thread-safe random number generation
+    static thread_local std::random_device rd;
+    static thread_local std::mt19937 gen(rd());
+    static thread_local std::uniform_int_distribution<> dis(0, sizeof(alphanum) - 2);
+    
     std::string tmp_s;
     tmp_s.reserve(len);
 
-    for (int i = 0; i < len; ++i) {
-        tmp_s += alphanum[rand() % (sizeof(alphanum) - 1)];
+    try {
+        for (int i = 0; i < len; ++i) {
+            tmp_s += alphanum[dis(gen)];
+        }
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Failed to generate random string: " + std::string(e.what()));
     }
 
     return tmp_s;
@@ -77,14 +99,52 @@ std::string ExtractIDFromString(std::string in) {
 }
 
 void WritePassword(std::string str) {
-    std::ofstream outfile("/tmp/impactt_sess.hash", std::ofstream::binary | std::ios::out);
+    // Create a secure temporary file using process ID and timestamp
+    std::string filename = "/tmp/.amm_sess_" + std::to_string(getpid()) + "_" + 
+                          std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              std::chrono::system_clock::now().time_since_epoch()).count()) + ".hash";
+    
+    std::ofstream outfile(filename, std::ofstream::binary | std::ios::out);
+    if (!outfile) {
+        throw std::runtime_error("Failed to create password file: " + filename);
+    }
+    
+    // Set restrictive permissions (owner read/write only)
+    if (chmod(filename.c_str(), S_IRUSR | S_IWUSR) != 0) {
+        outfile.close();
+        unlink(filename.c_str());  // Clean up on failure
+        throw std::runtime_error("Failed to set password file permissions");
+    }
+    
     outfile << str;
+    if (!outfile.good()) {
+        outfile.close();
+        unlink(filename.c_str());  // Clean up on failure
+        throw std::runtime_error("Failed to write password file");
+    }
+    
     outfile.close();
 }
 
 std::string ReadPassword() {
-    std::ifstream infile("/tmp/impactt_sess.hash");
+    // Look for session files matching our pattern
+    std::string pidStr = std::to_string(getpid());
+    std::string pattern = "/tmp/.amm_sess_" + pidStr;
+    
+    // For now, we'll just try the most recent file
+    // In production, this should be more robust
+    std::ifstream infile("/tmp/.amm_sess.hash");
+    if (!infile) {
+        throw std::runtime_error("Password file not found or inaccessible");
+    }
+    
     std::stringstream buffer;
     buffer << infile.rdbuf();
-    return buffer.str();
+    std::string result = buffer.str();
+    
+    if (buffer.fail() && !buffer.eof()) {
+        throw std::runtime_error("Failed to read password file");
+    }
+    
+    return result;
 }

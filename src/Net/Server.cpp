@@ -2,46 +2,64 @@
 
 // Static members
 std::vector<Client *> Server::clients;
+std::unordered_map<std::string, Client*> Server::clientsById;
 
 // Constructor
 Server::Server(int port) {
 	int yes = 1;
 	m_runThread = true;
+	serverSock = -1; // Initialize to invalid
 
-	// Initialize the server socket
-	serverSock = socket(AF_INET, SOCK_STREAM, 0);
-	if (serverSock < 0) {
-		throw std::runtime_error("Failed to create socket");
+	try {
+		// Initialize the server socket
+		serverSock = socket(AF_INET, SOCK_STREAM, 0);
+		if (serverSock < 0) {
+			throw std::runtime_error("Failed to create socket");
+		}
+
+		// Configure the server address
+		memset(&serverAddr, 0, sizeof(sockaddr_in));
+		serverAddr.sin_family = AF_INET;
+		serverAddr.sin_addr.s_addr = INADDR_ANY;
+		serverAddr.sin_port = htons(port);
+
+		// Set socket options
+		if (setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) < 0) {
+			throw std::runtime_error("Failed to set SO_REUSEADDR");
+		}
+		if (setsockopt(serverSock, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int)) < 0) {
+			throw std::runtime_error("Failed to set TCP_NODELAY");
+		}
+
+		// Add non-blocking socket option
+		if (fcntl(serverSock, F_SETFL, O_NONBLOCK) < 0) {
+			throw std::runtime_error("Failed to set non-blocking mode");
+		}
+
+		// Bind the socket
+		if (bind(serverSock, (struct sockaddr *) &serverAddr, sizeof(sockaddr_in)) < 0) {
+			throw std::runtime_error("Failed to bind socket");
+		}
+
+		// Start listening
+		if (listen(serverSock, DEFAULT_SERVER_BACKLOG) < 0) {
+			throw std::runtime_error("Failed to listen on socket");
+		}
+
+		// Start the thread monitor
+		monitorRunning = true;
+		monitorThread = std::make_unique<std::thread>(&Server::MonitorThreads, this);
+
+		LOG_INFO << "Server initialized on port " << port;
+	} catch (...) {
+		// Clean up socket if any operation failed
+		if (serverSock >= 0) {
+			close(serverSock);
+			serverSock = -1;
+		}
+		monitorRunning = false;
+		throw; // Re-throw the exception
 	}
-
-	// Configure the server address
-	memset(&serverAddr, 0, sizeof(sockaddr_in));
-	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_addr.s_addr = INADDR_ANY;
-	serverAddr.sin_port = htons(port);
-
-	// Set socket options
-	setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
-	setsockopt(serverSock, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int));
-
-	// Add non-blocking socket option
-	fcntl(serverSock, F_SETFL, O_NONBLOCK);
-
-	// Bind the socket
-	if (bind(serverSock, (struct sockaddr *) &serverAddr, sizeof(sockaddr_in)) < 0) {
-		throw std::runtime_error("Failed to bind socket");
-	}
-
-	// Start listening
-	if (listen(serverSock, 30) < 0) {
-		throw std::runtime_error("Failed to listen on socket");
-	}
-
-	// Start the thread monitor
-	monitorRunning = true;
-	monitorThread = std::make_unique<std::thread>(&Server::MonitorThreads, this);
-
-	LOG_INFO << "Server initialized on port " << port;
 }
 
 // Add a destructor or cleanup method to stop the monitor thread
@@ -60,7 +78,7 @@ Server::~Server() {
 void Server::MonitorThreads() {
 	while (monitorRunning) {
 		// Sleep to avoid high CPU usage
-		std::this_thread::sleep_for(std::chrono::seconds(5));
+		std::this_thread::sleep_for(std::chrono::seconds(DEFAULT_THREAD_CLEANUP_INTERVAL_SEC));
 
 		// Check and clean up completed threads
 		CleanupCompletedThreads();
@@ -85,7 +103,8 @@ void Server::AcceptAndDispatch() {
 	socklen_t cliSize = sizeof(sockaddr_in);
 
 	while (m_runThread) {
-		auto *client = new Client();
+		// Use unique_ptr for automatic cleanup
+		std::unique_ptr<Client> client = std::make_unique<Client>();
 
 		// Set the accept() to use a timeout with select()
 		fd_set readfds;
@@ -93,7 +112,7 @@ void Server::AcceptAndDispatch() {
 		FD_SET(serverSock, &readfds);
 
 		struct timeval timeout;
-		timeout.tv_sec = 1;  // 1 second timeout
+		timeout.tv_sec = DEFAULT_UDP_SELECT_TIMEOUT_SEC;
 		timeout.tv_usec = 0;
 
 		int activity = select(serverSock + 1, &readfds, NULL, NULL, &timeout);
@@ -101,15 +120,15 @@ void Server::AcceptAndDispatch() {
 		if (activity < 0) {
 			if (errno != EINTR) {
 				LOG_ERROR << "Select error on server socket: " << strerror(errno);
-				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+				std::this_thread::sleep_for(std::chrono::milliseconds(DEFAULT_ERROR_RETRY_DELAY_MS));
 			}
-			delete client;
+			// client automatically deleted by unique_ptr
 			continue;
 		}
 
 		if (activity == 0) {
 			// Timeout, no new connections
-			delete client;
+			// client automatically deleted by unique_ptr
 			continue;
 		}
 
@@ -118,18 +137,17 @@ void Server::AcceptAndDispatch() {
 
 		if (client->sock < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				// No new connection available
-				delete client;
+				// No new connection available - client automatically cleaned up
 				continue;
 			}
 
 			LOG_ERROR << "Error on accept: " << strerror(errno);
-			delete client;
+			// client automatically deleted by unique_ptr
 
 			if (errno == EINTR) {
 				continue; // Retry on interrupt
 			} else {
-				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+				std::this_thread::sleep_for(std::chrono::milliseconds(DEFAULT_ERROR_RETRY_DELAY_MS));
 				continue; // Continue instead of breaking to avoid service interruption
 			}
 		}
@@ -137,9 +155,13 @@ void Server::AcceptAndDispatch() {
 		// Handle new client connection
 		try {
 			auto clientThread = std::make_unique<ServerThread>();
-			pthread_t threadId = clientThread->Create((void *) Server::HandleClient, client);
+			// Release ownership from unique_ptr since thread will manage client lifecycle
+			Client* rawClientPtr = client.release();
+			pthread_t threadId = clientThread->Create((void *) Server::HandleClient, rawClientPtr);
 
 			if (threadId == 0) {
+				// Thread creation failed - we need to clean up the client
+				delete rawClientPtr;
 				throw std::runtime_error("Failed to create thread");
 			}
 
@@ -151,8 +173,11 @@ void Server::AcceptAndDispatch() {
 
 		} catch (std::exception &e) {
 			LOG_ERROR << "Failed to create thread for client: " << e.what();
-			close(client->sock);
-			delete client;
+			// Close socket if client is still owned by unique_ptr
+			if (client) {
+				close(client->sock);
+				// client automatically deleted by unique_ptr
+			}
 		}
 	}
 
@@ -167,9 +192,31 @@ void Server::SendToClient(Client *client, const std::string &message) {
 	if (!client) return;
 
 	try {
-		// Get socket info without global lock - individual socket operations are thread-safe
-		int clientSocket = client->sock;
-		std::string clientId = client->id;
+		// Safely extract client info with validation
+		int clientSocket;
+		std::string clientId;
+		
+		{
+			// Brief lock to safely read client data
+			std::lock_guard<std::mutex> lock(clientsMutex);
+			
+			// Verify client is still in our list (prevents use-after-free)
+			bool clientFound = false;
+			for (const auto& c : clients) {
+				if (c == client) {
+					clientFound = true;
+					break;
+				}
+			}
+			
+			if (!clientFound) {
+				// Client has been removed, don't attempt to send
+				return;
+			}
+			
+			clientSocket = client->sock;
+			clientId = client->id;
+		}
 
 		// Validate socket is still valid
 		if (clientSocket <= 0) {
@@ -184,7 +231,7 @@ void Server::SendToClient(Client *client, const std::string &message) {
 
 		struct timeval timeout;
 		timeout.tv_sec = 0;
-		timeout.tv_usec = 100000;  // 100ms timeout instead of 1 second
+		timeout.tv_usec = DEFAULT_SEND_SELECT_TIMEOUT_USEC;
 
 		int selectResult = select(clientSocket + 1, NULL, &writefds, NULL, &timeout);
 
@@ -271,12 +318,8 @@ void Server::SendToAll(char *message) {
 
 Client *Server::GetClientByIndex(const std::string &id) {
 	// This method expects the caller to have already acquired clientsMutex
-	for (auto &client: clients) {
-		if (client && client->id == id) {
-			return client;
-		}
-	}
-	return nullptr;
+	auto it = clientsById.find(id);
+	return (it != clientsById.end()) ? it->second : nullptr;
 }
 
 // List all connected clients
@@ -294,13 +337,13 @@ void Server::RemoveClient(Client *client) {
 
 	int index = FindClientIndex(client);
 	if (index != -1) {
-		// Don't delete the client here, it will be deleted by the caller
+		// Remove from both containers
 		clients.erase(clients.begin() + index);
+		clientsById.erase(client->id);
 		LOG_INFO << "Client removed: " << client->id;
 	} else {
 		LOG_ERROR << "Client not found for removal: " << client->id;
 	}
-
 }
 
 // Check if a client is still connected by testing the socket
@@ -373,5 +416,6 @@ void Server::CreateClient(Client *c, std::string &uuid) {
 	std::string defaultName = "Client " + c->id;
 	c->SetName(defaultName);
 	clients.push_back(c);  // Store the pointer directly, not a copy
+	clientsById[c->id] = c; // Add to fast lookup map
 	LOG_DEBUG << "Adding client with id: " << c->id;
 }

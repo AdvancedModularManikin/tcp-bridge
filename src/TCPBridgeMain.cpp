@@ -40,10 +40,78 @@ const string actionPrefix = "ACT=";
 const string genericTopicPrefix = "[";
 const string keepAlivePrefix = "[KEEPALIVE]";
 
+// Buffer size constants
+const size_t CLIENT_BUFFER_SIZE = 8192;
+const size_t PROTOCOL_OVERHEAD = 25;
+
+// Message validation constants
+const size_t MAX_MESSAGE_LENGTH = 65536;
+const size_t MAX_TOPIC_LENGTH = 256;
+const size_t MAX_CLIENT_NAME_LENGTH = 128;
+
+// Network configuration constants
+const int DEFAULT_SERVER_PORT = 9015;
+const int DEFAULT_DISCOVERY_PORT = 8888;
+const int DEFAULT_CLIENT_SELECT_TIMEOUT_SEC = 30;
+
+// Connection management constants  
+const int DEFAULT_INACTIVITY_TIMEOUT_MIN = 10;
+const int DEFAULT_KEEPALIVE_IDLE_SEC = 60;
+const int DEFAULT_KEEPALIVE_INTERVAL_SEC = 10;
+const int DEFAULT_KEEPALIVE_COUNT = 6;
+
 std::mutex Server::clientsMutex;
+std::mutex globalDataMutex;  // Protects clientMap, globalInboundBuffer, subscribedTopics, publishedTopics
 
 TPMS pod;
 
+// Input validation functions
+bool isValidMessageLength(const std::string& message) {
+	return message.length() <= MAX_MESSAGE_LENGTH && !message.empty();
+}
+
+bool isValidClientName(const std::string& name) {
+	if (name.empty() || name.length() > MAX_CLIENT_NAME_LENGTH) {
+		return false;
+	}
+	// Check for valid characters (alphanumeric, spaces, underscores, hyphens)
+	for (char c : name) {
+		if (!std::isalnum(c) && c != ' ' && c != '_' && c != '-') {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool isValidTopic(const std::string& topic) {
+	if (topic.empty() || topic.length() > MAX_TOPIC_LENGTH) {
+		return false;
+	}
+	// Check for valid topic format (letters, numbers, underscores)
+	for (char c : topic) {
+		if (!std::isalnum(c) && c != '_') {
+			return false;
+		}
+	}
+	return true;
+}
+
+std::string sanitizeInput(const std::string& input) {
+	std::string sanitized = input;
+	// Remove null bytes and control characters except newline and tab
+	sanitized.erase(std::remove_if(sanitized.begin(), sanitized.end(), 
+		[](char c) { return (c >= 0 && c < 32 && c != '\n' && c != '\t') || c == 127; }), 
+		sanitized.end());
+	return sanitized;
+}
+
+// Safely extract message content after a prefix
+std::string safeExtractAfterPrefix(const std::string& message, const std::string& prefix) {
+	if (message.length() <= prefix.size()) {
+		return "";
+	}
+	return message.substr(prefix.size());
+}
 
 void broadcastDisconnection(const ConnectionData &gc) {
 	std::ostringstream message;
@@ -81,7 +149,7 @@ void handleClientDisconnection(Client *c) {
 		}
 
 		{
-			std::lock_guard<std::mutex> lock(Server::clientsMutex);
+			std::lock_guard<std::mutex> lock(globalDataMutex);
 			clientMap.erase(c->id);
 			globalInboundBuffer.erase(c->id);
 
@@ -91,22 +159,32 @@ void handleClientDisconnection(Client *c) {
 		}
 
 		// Safe socket shutdown
-		shutdown(c->sock, SHUT_RDWR);
-		close(c->sock);
+		if (c->sock > 0) {
+			shutdown(c->sock, SHUT_RDWR);
+			close(c->sock);
+			c->sock = -1; // Mark as closed
+		}
 
-		// Remove from server's client list
+		// Remove from server's client list BEFORE deleting
 		Server::RemoveClient(c);
 
 		// Finally delete the client object
 		delete c;
+		c = nullptr; // Prevent accidental reuse
 
 	} catch (const std::exception &e) {
 		LOG_ERROR << "Exception in handleClientDisconnection: " << e.what();
 
-		// Last-resort cleanup
+		// Last-resort cleanup - only if client wasn't already cleaned up
 		try {
-			close(c->sock);
-			delete c;
+			if (c && c->sock > 0) {
+				close(c->sock);
+				c->sock = -1;
+			}
+			if (c) {
+				delete c;
+				c = nullptr;
+			}
 		} catch (...) {
 			LOG_ERROR << "Fatal error during last-resort client cleanup";
 		}
@@ -116,30 +194,53 @@ void handleClientDisconnection(Client *c) {
 
 // Handler for client registration
 void handleRegisterMessage(Client *c, const std::string &message) {
-	std::string registerVal = message.substr(registerPrefix.size());
+	std::string registerVal = safeExtractAfterPrefix(message, registerPrefix);
+	if (registerVal.empty()) {
+		LOG_ERROR << "Malformed register message from client " << c->id << " - too short";
+		return;
+	}
+	
+	// Validate message length
+	if (!isValidMessageLength(registerVal)) {
+		LOG_ERROR << "Registration message from client " << c->id << " exceeds maximum length or is empty";
+		return;
+	}
+	
+	// Sanitize input
+	registerVal = sanitizeInput(registerVal);
 	LOG_INFO << "Client " << c->id << " registered name: " << registerVal;
 
 	// Parse client registration data
 	auto parts = split(registerVal, ';');
 	if (parts.size() >= 2) {
+		// Validate client names
+		if (!isValidClientName(parts[0]) || !isValidClientName(parts[1])) {
+			LOG_ERROR << "Invalid client or learner name from client " << c->id;
+			return;
+		}
+		
 		auto gc = GetGameClient(c->id);
 		gc.client_name = parts[0];
 		gc.learner_name = parts[1];
 		gc.client_status = "CONNECTED";
 		UpdateGameClient(c->id, gc);
+		
+		// Notify all clients of new registration
+		std::ostringstream joinMessage;
+		joinMessage << "CLIENT_JOINED=" << c->id << std::endl;
+		Server::SendToAll(joinMessage.str());
 	} else {
-		LOG_WARNING << "Malformed registration message: " << registerVal;
+		LOG_WARNING << "Malformed registration message from client " << c->id << ": " << registerVal;
 	}
-
-	// Notify all clients of new registration
-	std::ostringstream joinMessage;
-	joinMessage << "CLIENT_JOINED=" << c->id << std::endl;
-	Server::SendToAll(joinMessage.str());
 }
 
 // Handler for kicking a client
 void handleKickMessage(Client *c, const std::string &message) {
-	std::string kickId = message.substr(kickPrefix.size());
+	std::string kickId = safeExtractAfterPrefix(message, kickPrefix);
+	if (kickId.empty()) {
+		LOG_ERROR << "Malformed kick message from client " << c->id;
+		return;
+	}
 	LOG_INFO << "Client " << c->id << " requested kick of client ID: " << kickId;
 
 	auto it = gameClientList.find(kickId);
@@ -159,7 +260,11 @@ void handleKickMessage(Client *c, const std::string &message) {
 
 // Handler for setting client status
 void handleStatusMessage(Client *c, const std::string &message) {
-	std::string encodedStatus = message.substr(statusPrefix.size());
+	std::string encodedStatus = safeExtractAfterPrefix(message, statusPrefix);
+	if (encodedStatus.empty()) {
+		LOG_ERROR << "Malformed status message from client " << c->id;
+		return;
+	}
 	std::string status;
 	try {
 		status = Utility::decode64(encodedStatus);
@@ -175,7 +280,11 @@ void handleStatusMessage(Client *c, const std::string &message) {
 
 // Handler for client capabilities announcement
 void handleCapabilityMessage(Client *c, const std::string &message) {
-	std::string encodedCapabilities = message.substr(capabilityPrefix.size());
+	std::string encodedCapabilities = safeExtractAfterPrefix(message, capabilityPrefix);
+	if (encodedCapabilities.empty()) {
+		LOG_ERROR << "Malformed capabilities message from client " << c->id;
+		return;
+	}
 	std::string capabilities;
 	std::ostringstream ack;
 
@@ -201,7 +310,11 @@ void handleCapabilityMessage(Client *c, const std::string &message) {
 
 // Handler for client settings message
 void handleSettingsMessage(Client *c, const std::string &message) {
-	std::string encodedSettings = message.substr(settingsPrefix.size());
+	std::string encodedSettings = safeExtractAfterPrefix(message, settingsPrefix);
+	if (encodedSettings.empty()) {
+		LOG_ERROR << "Malformed settings message from client " << c->id;
+		return;
+	}
 	std::string settings;
 	try {
 		settings = Utility::decode64(encodedSettings);
@@ -217,7 +330,11 @@ void handleSettingsMessage(Client *c, const std::string &message) {
 
 // Handler for client requests
 void handleRequestMessage(Client *c, const std::string &message) {
-	std::string request = message.substr(requestPrefix.size());
+	std::string request = safeExtractAfterPrefix(message, requestPrefix);
+	if (request.empty()) {
+		LOG_ERROR << "Malformed request message from client " << c->id;
+		return;
+	}
 	LOG_INFO << "Client " << c->id << " sent request: " << request;
 	auto tmgr = pod.GetManikin(DEFAULT_MANIKIN_ID);
 	if (tmgr) tmgr->DispatchRequest(c, request);
@@ -225,7 +342,11 @@ void handleRequestMessage(Client *c, const std::string &message) {
 
 // Handler for client actions
 void handleActionMessage(Client *c, const std::string &message) {
-	std::string action = message.substr(actionPrefix.size());
+	std::string action = safeExtractAfterPrefix(message, actionPrefix);
+	if (action.empty()) {
+		LOG_ERROR << "Malformed action message from client " << c->id;
+		return;
+	}
 	LOG_INFO << "Client " << c->id << " sent action: " << action;
 
 	AMM::Command cmdInstance;
@@ -241,8 +362,13 @@ void parseKeyValuePairs(const std::string &message, std::map<std::string, std::s
 
 	// Process each token to extract key-value pairs
 	for (const auto &token: tokens) {
+		// Skip empty tokens
+		if (token.empty()) {
+			continue;
+		}
+		
 		size_t sep_pos = token.find('=');
-		if (sep_pos != std::string::npos) {
+		if (sep_pos != std::string::npos && sep_pos > 0 && sep_pos < token.length() - 1) {
 			std::string key = token.substr(0, sep_pos);
 			std::string value = token.substr(sep_pos + 1);
 
@@ -251,17 +377,15 @@ void parseKeyValuePairs(const std::string &message, std::map<std::string, std::s
 			boost::trim(value);
 			boost::to_lower(key);
 
-			kvp[key] = value; // Insert into map
+			// Only add if key is not empty after trimming
+			if (!key.empty()) {
+				kvp[key] = value; // Insert into map
+			} else {
+				LOG_WARNING << "Empty key in token: " << token;
+			}
 		} else {
-			// Log a warning if the token is malformed
-			LOG_WARNING << "Malformed token in message: " << token;
-			std::string key = token.substr(0, sep_pos);
-			std::string value = token.substr(sep_pos + 1);
-
-			// Trim whitespace and convert key to lowercase for consistency
-			boost::trim(key);
-			boost::trim(value);
-			boost::to_lower(key);
+			// Log a warning and skip malformed tokens entirely
+			LOG_WARNING << "Malformed token in message (skipping): " << token;
 		}
 	}
 }
@@ -284,7 +408,17 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	parseKeyValuePairs(message, kvp);
 
 	AMM::UUID erID;
-	erID.id(kvp["event_id"].empty() ? AMM::DDSManager<Manikin>::GenerateUuidString() : kvp["event_id"]);
+	std::string eventId = kvp["event_id"];
+	if (eventId.empty()) {
+		try {
+			eventId = AMM::DDSManager<Manikin>::GenerateUuidString();
+		} catch (const std::exception& e) {
+			LOG_ERROR << "Failed to generate event UUID, using fallback: " << e.what();
+			eventId = "event_" + std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(
+				std::chrono::steady_clock::now().time_since_epoch()).count());
+		}
+	}
+	erID.id(eventId);
 
 	AMM::FMA_Location fma;
 	fma.name(kvp["location"]);
@@ -330,40 +464,56 @@ void handleKeepAliveMessage(Client *c) {
 }
 
 void processClientMessage(Client *c, const std::string &message) {
+	// Validate message length first
+	if (!isValidMessageLength(message)) {
+		LOG_ERROR << "Message from client " << c->id << " exceeds maximum length or is empty";
+		return;
+	}
+	
+	// Sanitize message for safety
+	std::string sanitizedMessage = sanitizeInput(message);
+	
 	// Log and route the message based on its prefix/type
-	if (message.find(keepAlivePrefix) == 0) {
+	if (sanitizedMessage.find(keepAlivePrefix) == 0) {
 		handleKeepAliveMessage(c);
-	} else if (message.find(registerPrefix) == 0) {
-		handleRegisterMessage(c, message);
-	} else if (message.find(kickPrefix) == 0) {
-		handleKickMessage(c, message);
-	} else if (message.find(statusPrefix) == 0) {
-		handleStatusMessage(c, message);
-	} else if (message.find(capabilityPrefix) == 0) {
-		handleCapabilityMessage(c, message);
-	} else if (message.find(settingsPrefix) == 0) {
-		handleSettingsMessage(c, message);
-	} else if (message.find(requestPrefix) == 0) {
-		handleRequestMessage(c, message);
-	} else if (message.find(actionPrefix) == 0) {
-		handleActionMessage(c, message);
-	} else if (message.find(genericTopicPrefix) == 0) {
+	} else if (sanitizedMessage.find(registerPrefix) == 0) {
+		handleRegisterMessage(c, sanitizedMessage);
+	} else if (sanitizedMessage.find(kickPrefix) == 0) {
+		handleKickMessage(c, sanitizedMessage);
+	} else if (sanitizedMessage.find(statusPrefix) == 0) {
+		handleStatusMessage(c, sanitizedMessage);
+	} else if (sanitizedMessage.find(capabilityPrefix) == 0) {
+		handleCapabilityMessage(c, sanitizedMessage);
+	} else if (sanitizedMessage.find(settingsPrefix) == 0) {
+		handleSettingsMessage(c, sanitizedMessage);
+	} else if (sanitizedMessage.find(requestPrefix) == 0) {
+		handleRequestMessage(c, sanitizedMessage);
+	} else if (sanitizedMessage.find(actionPrefix) == 0) {
+		handleActionMessage(c, sanitizedMessage);
+	} else if (sanitizedMessage.find(genericTopicPrefix) == 0) {
 		// Parse the topic and message content for modification-type messages
-		int firstBracket = message.find('[');
-		int lastBracket = message.find(']');
+		int firstBracket = sanitizedMessage.find('[');
+		int lastBracket = sanitizedMessage.find(']');
 
 		if (firstBracket != std::string::npos && lastBracket != std::string::npos) {
-			std::string topic = message.substr(firstBracket + 1, lastBracket - firstBracket - 1);
-			std::string content = message.substr(lastBracket + 1);
+			std::string topic = sanitizedMessage.substr(firstBracket + 1, lastBracket - firstBracket - 1);
+			std::string content = sanitizedMessage.substr(lastBracket + 1);
+			
+			// Validate topic format
+			if (!isValidTopic(topic)) {
+				LOG_ERROR << "Invalid topic format from client " << c->id << ": " << topic;
+				return;
+			}
+			
 			handleModificationMessage(c, content, topic);
 		} else {
-			LOG_ERROR << "Malformed generic topic message from client " << c->id << ": " << message;
+			LOG_ERROR << "Malformed generic topic message from client " << c->id << ": " << sanitizedMessage;
 		}
-	} else if (message.find(" Connected") != std::string::npos) {
-		LOG_INFO << "Module connection message: " << message;
+	} else if (sanitizedMessage.find(" Connected") != std::string::npos) {
+		LOG_INFO << "Module connection message: " << sanitizedMessage;
 	} else {
 		// Log an unknown or unsupported message type
-		LOG_ERROR << "Unknown or unsupported message from client " << c->id << ": " << message;
+		LOG_ERROR << "Unknown or unsupported message from client " << c->id << ": " << sanitizedMessage;
 	}
 }
 
@@ -372,16 +522,30 @@ void *Server::HandleClient(void *args) {
 	if (!c) return nullptr;
 
 	try {
-		char buffer[8192 - 25];
+		char buffer[CLIENT_BUFFER_SIZE - PROTOCOL_OVERHEAD];
 		ssize_t n;
-		std::string uuid = gen_random(10);
+		std::string uuid;
+		
+		// Generate UUID with error handling
+		try {
+			uuid = gen_random(10);
+		} catch (const std::exception& e) {
+			LOG_ERROR << "Failed to generate client UUID: " << e.what();
+			// Use fallback UUID based on timestamp and thread ID
+			auto now = std::chrono::steady_clock::now();
+			auto timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+			uuid = "client_" + std::to_string(timestamp);
+		}
 
 		// Create a scope for better resource management
 		{
 			// Mutex management and client setup
 			CreateClient(c, uuid);
 
-			clientMap[c->id] = uuid;
+			{
+				std::lock_guard<std::mutex> lock(globalDataMutex);
+				clientMap[c->id] = uuid;
+			}
 
 			// Initialize game client data
 			auto gc = GetGameClient(c->id);
@@ -396,9 +560,9 @@ void *Server::HandleClient(void *args) {
 
 			// Ensure TCP keepalive is enabled to detect dead peers
 			int keepalive = 1;
-			int keepidle = 60; // Start probing after 60 seconds of inactivity
-			int keepintvl = 10; // Send probes every 10 seconds
-			int keepcnt = 6;   // Consider connection dead after 6 failed probes
+			int keepidle = DEFAULT_KEEPALIVE_IDLE_SEC;
+			int keepintvl = DEFAULT_KEEPALIVE_INTERVAL_SEC;
+			int keepcnt = DEFAULT_KEEPALIVE_COUNT;
 
 			setsockopt(c->sock, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive));
 
@@ -417,7 +581,7 @@ void *Server::HandleClient(void *args) {
 
 			// Variables for detecting client inactivity
 			auto lastActivity = std::chrono::steady_clock::now();
-			const auto maxInactivityDuration = std::chrono::minutes(10); // 10 minutes timeout
+			const auto maxInactivityDuration = std::chrono::minutes(DEFAULT_INACTIVITY_TIMEOUT_MIN);
 
 			bool clientActive = true;
 			while (clientActive) {
@@ -430,7 +594,7 @@ void *Server::HandleClient(void *args) {
 
 				// Set timeout for select - shorter timeout allows us to check connection health
 				struct timeval timeout;
-				timeout.tv_sec = 30;  // 30 second timeout
+				timeout.tv_sec = DEFAULT_CLIENT_SELECT_TIMEOUT_SEC;
 				timeout.tv_usec = 0;
 
 				int activity = select(c->sock + 1, &readfds, NULL, NULL, &timeout);
@@ -475,7 +639,7 @@ void *Server::HandleClient(void *args) {
 					lastActivity = now; // Update last activity time
 
 					// Use non-blocking recv - it will not block since select indicated data is ready
-					n = recv(c->sock, buffer, sizeof(buffer), 0);
+					n = recv(c->sock, buffer, sizeof(buffer) - 1, 0); // Leave space for null terminator
 
 					// Check if client disconnected
 					if (n == 0) {
@@ -493,16 +657,24 @@ void *Server::HandleClient(void *args) {
 						break;
 					}
 
-					// Process received message
-					std::string tempBuffer(buffer);
-					globalInboundBuffer[c->id] += tempBuffer;
-
-					if (!boost::algorithm::ends_with(globalInboundBuffer[c->id], "\n")) {
-						continue;
+					// Process received message - ensure null termination
+					buffer[n] = '\0';
+					std::string tempBuffer(buffer, n);
+					
+					std::string currentBuffer;
+					{
+						std::lock_guard<std::mutex> lock(globalDataMutex);
+						globalInboundBuffer[c->id] += tempBuffer;
+						
+						if (!boost::algorithm::ends_with(globalInboundBuffer[c->id], "\n")) {
+							continue;
+						}
+						
+						currentBuffer = globalInboundBuffer[c->id];
+						globalInboundBuffer[c->id].clear();
 					}
 
-					auto messages = Utility::explode("\n", globalInboundBuffer[c->id]);
-					globalInboundBuffer[c->id].clear();
+					auto messages = Utility::explode("\n", currentBuffer);
 
 					for (auto &message: messages) {
 						boost::trim(message);
@@ -534,11 +706,13 @@ void *Server::HandleClient(void *args) {
 
 			// Last-resort cleanup
 			try {
-				std::lock_guard<std::mutex> lock(Server::clientsMutex);
-				clientMap.erase(c->id);
-				globalInboundBuffer.erase(c->id);
-				subscribedTopics.erase(c->id);
-				publishedTopics.erase(c->id);
+				{
+					std::lock_guard<std::mutex> lock(globalDataMutex);
+					clientMap.erase(c->id);
+					globalInboundBuffer.erase(c->id);
+					subscribedTopics.erase(c->id);
+					publishedTopics.erase(c->id);
+				}
 
 				Server::RemoveClient(c);
 				close(c->sock);
@@ -554,10 +728,16 @@ void *Server::HandleClient(void *args) {
 		try {
 			handleClientDisconnection(c);
 		} catch (...) {
-			// Last-resort cleanup
+			// Last-resort cleanup - only if client wasn't already cleaned up
 			try {
-				close(c->sock);
-				delete c;
+				if (c && c->sock > 0) {
+					close(c->sock);
+					c->sock = -1;
+				}
+				if (c) {
+					delete c;
+					c = nullptr;
+				}
 			} catch (...) {
 				LOG_ERROR << "Fatal error during client cleanup";
 			}
@@ -583,8 +763,8 @@ int main(int argc, const char *argv[]) {
 	static plog::ColorConsoleAppender<plog::TxtFormatter> consoleAppender;
 	plog::init(plog::verbose, &consoleAppender);
 
-	short discoveryPort = 8888;
-	int bridgePort = 9015;
+	short discoveryPort = DEFAULT_DISCOVERY_PORT;
+	int bridgePort = DEFAULT_SERVER_PORT;
 	bool podMode = true;
 	bool discovery = true;
 	int manikinCount = 1;
@@ -598,8 +778,8 @@ int main(int argc, const char *argv[]) {
 	desc.add_options()
 			("help,h", "print usage message")
 			("discovery", po::value(&discovery)->default_value(true), "UDP autodiscovery")
-			("discovery_port,dp", po::value(&discoveryPort)->default_value(8888), "Autodiscovery port")
-			("server_port,sp", po::value(&bridgePort)->default_value(9015), "Bridge port")
+			("discovery_port,dp", po::value(&discoveryPort)->default_value(DEFAULT_DISCOVERY_PORT), "Autodiscovery port")
+			("server_port,sp", po::value(&bridgePort)->default_value(DEFAULT_SERVER_PORT), "Bridge port")
 			("pod_mode", po::value(&podMode)->default_value(false), "POD mode")
 			("manikin_id", po::value(&manikinId)->default_value("manikin_1"), "Manikin ID")
 			("manikins", po::value(&manikinCount)->default_value(1))

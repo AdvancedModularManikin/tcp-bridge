@@ -1217,10 +1217,15 @@ void Manikin::handleRemoteCommand(const std::string &value) {
 
 		if (kvp.find("password") != kvp.end()) {
 			SESSION_PASSWORD = kvp["password"];
-			LOG_INFO << "Enabling remote with password " << SESSION_PASSWORD;
-			WritePassword(SESSION_PASSWORD);
+			LOG_INFO << "Enabling remote authentication (password configured)";
+			try {
+				WritePassword(SESSION_PASSWORD);
+			} catch (const std::exception& e) {
+				LOG_ERROR << "Failed to store authentication credentials: " << e.what();
+				return;
+			}
 		} else {
-			LOG_WARNING << "No password set, we can't do anything with this.";
+			LOG_WARNING << "No password set, remote authentication disabled.";
 			return;
 		}
 
