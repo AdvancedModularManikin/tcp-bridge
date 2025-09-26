@@ -96,7 +96,23 @@ bool isValidTopic(const std::string& topic) {
 	return true;
 }
 
-std::string sanitizeInput(const std::string& input) {
+std::string sanitizeInput(const std::string& input, bool preserveBase64 = false) {
+	if (preserveBase64) {
+		// For base64 data, validate it contains only valid base64 characters
+		// This is safer than removing characters which would corrupt the data
+		// Base64 alphabet: A-Z, a-z, 0-9, +, /, = (padding)
+		// Any other characters indicate potentially malicious input
+		for (char c : input) {
+			if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || 
+			      (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=')) {
+				// Found invalid base64 character - this might be malicious
+				LOG_WARNING << "Invalid base64 character detected: " << (int)c;
+				return ""; // Return empty string to indicate invalid data
+			}
+		}
+		return input; // Return original if valid base64
+	}
+	
 	std::string sanitized = input;
 	// Remove null bytes and control characters except newline and tab
 	sanitized.erase(std::remove_if(sanitized.begin(), sanitized.end(), 
@@ -265,6 +281,14 @@ void handleStatusMessage(Client *c, const std::string &message) {
 		LOG_ERROR << "Malformed status message from client " << c->id;
 		return;
 	}
+	
+	// Validate and sanitize base64 data
+	encodedStatus = sanitizeInput(encodedStatus, true);
+	if (encodedStatus.empty()) {
+		LOG_ERROR << "Invalid base64 status from client " << c->id;
+		return;
+	}
+	
 	std::string status;
 	try {
 		status = Utility::decode64(encodedStatus);
@@ -285,6 +309,17 @@ void handleCapabilityMessage(Client *c, const std::string &message) {
 		LOG_ERROR << "Malformed capabilities message from client " << c->id;
 		return;
 	}
+	
+	// Validate and sanitize base64 data
+	encodedCapabilities = sanitizeInput(encodedCapabilities, true);
+	if (encodedCapabilities.empty()) {
+		LOG_ERROR << "Invalid base64 capabilities from client " << c->id;
+		std::ostringstream ack;
+		ack << "ERROR_IN_CAPABILITIES_RECEIVED=" << c->id << std::endl;
+		Server::SendToClient(c, ack.str());
+		return;
+	}
+	
 	std::string capabilities;
 	std::ostringstream ack;
 
@@ -315,6 +350,14 @@ void handleSettingsMessage(Client *c, const std::string &message) {
 		LOG_ERROR << "Malformed settings message from client " << c->id;
 		return;
 	}
+	
+	// Validate and sanitize base64 data
+	encodedSettings = sanitizeInput(encodedSettings, true);
+	if (encodedSettings.empty()) {
+		LOG_ERROR << "Invalid base64 settings from client " << c->id;
+		return;
+	}
+	
 	std::string settings;
 	try {
 		settings = Utility::decode64(encodedSettings);
