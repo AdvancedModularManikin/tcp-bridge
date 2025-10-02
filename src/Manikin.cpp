@@ -949,7 +949,7 @@ void Manikin::handleSimulationCommand(const std::string &value, const std::strin
 		}
 
 		AMM::SimulationControl simControl;
-		auto ms = duration_cast<std::chrono::milliseconds>(
+		auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
 				std::chrono::system_clock::now().time_since_epoch()).count();
 		simControl.timestamp(ms);
 		simControl.type(AMM::ControlType::RUN);
@@ -965,7 +965,7 @@ void Manikin::handleSimulationCommand(const std::string &value, const std::strin
 		}
 
 		AMM::SimulationControl simControl;
-		auto ms = duration_cast<std::chrono::milliseconds>(
+		auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
 				std::chrono::system_clock::now().time_since_epoch()).count();
 		simControl.timestamp(ms);
 		simControl.type(AMM::ControlType::HALT);
@@ -981,7 +981,7 @@ void Manikin::handleSimulationCommand(const std::string &value, const std::strin
 		}
 
 		AMM::SimulationControl simControl;
-		auto ms = duration_cast<std::chrono::milliseconds>(
+		auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
 				std::chrono::system_clock::now().time_since_epoch()).count();
 		simControl.timestamp(ms);
 		simControl.type(AMM::ControlType::HALT);
@@ -1000,7 +1000,7 @@ void Manikin::handleSimulationCommand(const std::string &value, const std::strin
 		Server::SendToAll(tmsg);
 
 		AMM::SimulationControl simControl;
-		auto ms = duration_cast<std::chrono::milliseconds>(
+		auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
 				std::chrono::system_clock::now().time_since_epoch()).count();
 		simControl.timestamp(ms);
 		simControl.type(AMM::ControlType::RESET);
@@ -1015,7 +1015,7 @@ void Manikin::handleSimulationCommand(const std::string &value, const std::strin
 		}
 
 		AMM::SimulationControl simControl;
-		auto ms = duration_cast<std::chrono::milliseconds>(
+		auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
 				std::chrono::system_clock::now().time_since_epoch()).count();
 		simControl.timestamp(ms);
 		simControl.type(AMM::ControlType::HALT);
@@ -1643,7 +1643,7 @@ void Manikin::PublishOperationalDescription() {
 
 void Manikin::PublishConfiguration() {
 	AMM::ModuleConfiguration mc;
-	auto ms = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 	mc.timestamp(ms);
 	mc.module_id(m_uuid);
 	mc.name(moduleName);
