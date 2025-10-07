@@ -278,7 +278,9 @@ void Manikin::onNewPhysiologyWaveform(AMM::PhysiologyWaveform &n, SampleInfo_t *
 }
 
 void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) {
-	// Drop values into the lab sheets
+	std::string slowname = "LF_" + n.name();
+
+	// Drop values into the lab sheets (always update lab data)
 	{
 		std::lock_guard <std::mutex> labLock(m_labMutex);
 		for (auto &outer_map_pair: labNodes) {
@@ -289,7 +291,29 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
 		}
 	}
 
+	// Check rate limiting for LF_ subscriptions
+	auto now = std::chrono::steady_clock::now();
+	bool shouldSendLf = true;
+
+	{
+		std::lock_guard<std::mutex> rateLimitLock(m_lfRateLimitMutex);
+		auto it = lastLfSendTime.find(slowname);
+		if (it != lastLfSendTime.end()) {
+			auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second);
+			if (elapsed.count() < 1000) {
+				// Less than 1 second since last send - drop LF_ sends
+				shouldSendLf = false;
+			}
+		}
+
+		if (shouldSendLf) {
+			// Update last send time for this LF_ value
+			lastLfSendTime[slowname] = now;
+		}
+	}
+
 	// Create a local copy of client information
+	// Check both normal subscription and LF_ subscription
 	std::vector <std::pair<std::string, Client *>> clientsToSend;
 
 	{
@@ -301,7 +325,14 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
 			std::string cid = it.first;
 			std::vector <std::string> subV = subscribedTopics[cid];
 
-			if (std::find(subV.begin(), subV.end(), n.name()) != subV.end()) {
+			// Check for normal subscription (no rate limit)
+			bool hasNormalSub = (std::find(subV.begin(), subV.end(), n.name()) != subV.end());
+
+			// Check for LF_ subscription (rate limited)
+			bool hasLfSub = (std::find(subV.begin(), subV.end(), slowname) != subV.end());
+
+			// Send if normal subscription, or if LF_ subscription and not rate limited
+			if (hasNormalSub || (hasLfSub && shouldSendLf)) {
 				Client *c = Server::GetClientByIndex(cid);
 				if (c) {
 					clientsToSend.emplace_back(cid, c);
@@ -1568,6 +1599,8 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 						continue;
 					}
 
+					const char *topicSlow = sE->Attribute("slow");					
+
 					std::string subTopicName(topicNameAttr);
 
 					if (sE->Attribute("nodepath")) {
@@ -1575,7 +1608,12 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 						if (subTopicName == "AMM_HighFrequencyNode_Data") {
 							subTopicName = "HF_" + subNodePath;
 						} else {
-							subTopicName = subNodePath;
+							if (topicSlow) {
+								subTopicName = "LF_" + subNodePath;
+							} else {
+								subTopicName = subNodePath;
+							}
+							
 						}
 					}
 					Utility::add_once(subscribedTopics[c->id], subTopicName);

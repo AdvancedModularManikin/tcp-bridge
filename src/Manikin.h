@@ -146,6 +146,10 @@ private:
 	std::mutex m_statusMutex;               // For currentStatus, currentScenario, currentState
 	std::mutex gcMapMutex;
 
+	// Rate limiting for LF_ (Low Frequency) physiology values - max 1 per second
+	std::map<std::string, std::chrono::steady_clock::time_point> lastLfSendTime;
+	std::mutex m_lfRateLimitMutex;          // For lastLfSendTime
+
 	// Command handler methods to break up onNewCommand
 	void handleSimulationCommand(const std::string& value, const std::string& mid);
 	void handleServiceCommand(const std::string& value, const std::string& mid);
