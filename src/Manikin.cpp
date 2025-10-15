@@ -298,8 +298,8 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
 		auto it = lastPhysioSendTime.find(n.name());
 		if (it != lastPhysioSendTime.end()) {
 			auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second);
-			if (elapsed.count() < 1000) {
-				// Less than 1 second since last send - drop this update
+			if (elapsed.count() < PHYSIO_RATE_LIMIT_MS) {
+				// Less than rate limit duration since last send - drop this update
 				shouldSend = false;
 			}
 		}
@@ -639,9 +639,14 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 	if (rendModPayload.find("CHOSE_ROLE") != std::string::npos) {
 		LOG_INFO << "Role chooser, break up participant: " << practitioner;
 		std::vector <std::string> participant_data = split(practitioner, ':');
+
+		if (participant_data.size() < 3) {
+			LOG_ERROR << "Invalid participant data format, expected 3 fields separated by ':': " << practitioner;
+			return;
+		}
+
 		const std::string &pid = participant_data[1];
 		ConnectionData gc = GetGameClient(pid);
-		const auto p1 = std::chrono::system_clock::now();
 		gc.role = participant_data[0];
 		gc.learner_name = participant_data[2];
 		LOG_INFO << "Updating client to role " << gc.role;
@@ -1636,12 +1641,31 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 
 void Manikin::HandleStatus(Client *c, std::string const &statusVal) {
 	tinyxml2::XMLDocument doc(false);
-	doc.Parse(statusVal.c_str());
+	tinyxml2::XMLError result = doc.Parse(statusVal.c_str());
+
+	if (result != tinyxml2::XML_SUCCESS) {
+		LOG_ERROR << "Failed to parse XML status: " << doc.ErrorStr();
+		return;
+	}
 
 	tinyxml2::XMLNode *root = doc.FirstChildElement("AMMModuleStatus");
-	tinyxml2::XMLElement *module =
-			root->FirstChildElement("module")->ToElement();
+	if (!root) {
+		LOG_ERROR << "Missing AMMModuleStatus element in status XML";
+		return;
+	}
+
+	tinyxml2::XMLElement *module = root->FirstChildElement("module");
+	if (!module) {
+		LOG_ERROR << "Missing module element in status XML";
+		return;
+	}
+
 	const char *name = module->Attribute("name");
+	if (!name) {
+		LOG_ERROR << "Missing name attribute in module element";
+		return;
+	}
+
 	std::string nodeName(name);
 
 	std::size_t found = statusVal.find(haltingString);

@@ -60,7 +60,6 @@ const int DEFAULT_KEEPALIVE_IDLE_SEC = 60;
 const int DEFAULT_KEEPALIVE_INTERVAL_SEC = 10;
 const int DEFAULT_KEEPALIVE_COUNT = 6;
 
-std::mutex Server::clientsMutex;
 std::mutex globalDataMutex;  // Protects clientMap, globalInboundBuffer, subscribedTopics, publishedTopics
 
 TPMS pod;

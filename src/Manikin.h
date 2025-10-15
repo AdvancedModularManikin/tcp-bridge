@@ -148,6 +148,7 @@ private:
 
 	// Rate limiting for physiology values - max 1 per second (always enforced)
 	// Note: Only waveforms support HF_ prefix for high-frequency; values are always rate-limited
+	static constexpr int PHYSIO_RATE_LIMIT_MS = 1000;  // Physiology value rate limit in milliseconds
 	std::map<std::string, std::chrono::steady_clock::time_point> lastPhysioSendTime;
 	std::mutex m_physioRateLimitMutex;      // For lastPhysioSendTime
 

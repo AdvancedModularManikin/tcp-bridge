@@ -40,5 +40,5 @@ private:
     enum {
         max_length = 1024
     };
-    char data_[max_length];
+    char data_[max_length] = {0};  // Initialize to prevent information leakage
 };

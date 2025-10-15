@@ -3,6 +3,7 @@
 // Static members
 std::vector<Client *> Server::clients;
 std::unordered_map<std::string, Client*> Server::clientsById;
+std::mutex Server::clientsMutex;  // Define static mutex
 
 // Constructor
 Server::Server(int port) {

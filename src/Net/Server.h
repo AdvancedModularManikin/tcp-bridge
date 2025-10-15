@@ -55,7 +55,7 @@ public:
 
 	static std::vector<Client*> clients;
 	static std::unordered_map<std::string, Client*> clientsById; // Fast lookup by ID
-	static std::mutex clientsMutex;
+	static std::mutex clientsMutex;  // Declared here, defined in Server.cpp
 	bool m_runThread;
 
 private:
