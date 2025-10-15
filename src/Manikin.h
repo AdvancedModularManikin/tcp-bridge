@@ -146,9 +146,10 @@ private:
 	std::mutex m_statusMutex;               // For currentStatus, currentScenario, currentState
 	std::mutex gcMapMutex;
 
-	// Rate limiting for LF_ (Low Frequency) physiology values - max 1 per second
-	std::map<std::string, std::chrono::steady_clock::time_point> lastLfSendTime;
-	std::mutex m_lfRateLimitMutex;          // For lastLfSendTime
+	// Rate limiting for physiology values - max 1 per second (always enforced)
+	// Note: Only waveforms support HF_ prefix for high-frequency; values are always rate-limited
+	std::map<std::string, std::chrono::steady_clock::time_point> lastPhysioSendTime;
+	std::mutex m_physioRateLimitMutex;      // For lastPhysioSendTime
 
 	// Command handler methods to break up onNewCommand
 	void handleSimulationCommand(const std::string& value, const std::string& mid);

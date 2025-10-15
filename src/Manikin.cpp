@@ -278,8 +278,6 @@ void Manikin::onNewPhysiologyWaveform(AMM::PhysiologyWaveform &n, SampleInfo_t *
 }
 
 void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) {
-	std::string slowname = "LF_" + n.name();
-
 	// Drop values into the lab sheets (always update lab data)
 	{
 		std::lock_guard <std::mutex> labLock(m_labMutex);
@@ -291,29 +289,33 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
 		}
 	}
 
-	// Check rate limiting for LF_ subscriptions
+	// Check rate limiting for subscriptions (rate limited to 1/sec)
 	auto now = std::chrono::steady_clock::now();
-	bool shouldSendLf = true;
+	bool shouldSend = true;
 
 	{
-		std::lock_guard<std::mutex> rateLimitLock(m_lfRateLimitMutex);
-		auto it = lastLfSendTime.find(slowname);
-		if (it != lastLfSendTime.end()) {
+		std::lock_guard<std::mutex> rateLimitLock(m_physioRateLimitMutex);
+		auto it = lastPhysioSendTime.find(n.name());
+		if (it != lastPhysioSendTime.end()) {
 			auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second);
 			if (elapsed.count() < 1000) {
-				// Less than 1 second since last send - drop LF_ sends
-				shouldSendLf = false;
+				// Less than 1 second since last send - drop this update
+				shouldSend = false;
 			}
 		}
 
-		if (shouldSendLf) {
-			// Update last send time for this LF_ value
-			lastLfSendTime[slowname] = now;
+		if (shouldSend) {
+			// Update last send time for this value
+			lastPhysioSendTime[n.name()] = now;
 		}
 	}
 
+	// Only send if rate limit allows
+	if (!shouldSend) {
+		return;
+	}
+
 	// Create a local copy of client information
-	// Check both normal subscription and LF_ subscription
 	std::vector <std::pair<std::string, Client *>> clientsToSend;
 
 	{
@@ -325,14 +327,8 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
 			std::string cid = it.first;
 			std::vector <std::string> subV = subscribedTopics[cid];
 
-			// Check for normal subscription (no rate limit)
-			bool hasNormalSub = (std::find(subV.begin(), subV.end(), n.name()) != subV.end());
-
-			// Check for LF_ subscription (rate limited)
-			bool hasLfSub = (std::find(subV.begin(), subV.end(), slowname) != subV.end());
-
-			// Send if normal subscription, or if LF_ subscription and not rate limited
-			if (hasNormalSub || (hasLfSub && shouldSendLf)) {
+			// Check for subscription (always rate limited to 1/sec)
+			if (std::find(subV.begin(), subV.end(), n.name()) != subV.end()) {
 				Client *c = Server::GetClientByIndex(cid);
 				if (c) {
 					clientsToSend.emplace_back(cid, c);
@@ -353,8 +349,7 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
 	}
 }
 
-void Manikin::onNewPhysiologyModification(AMM::PhysiologyModification &pm, SampleInfo_t *info) {
-	LOG_DEBUG << "Received a phys mod from manikin " << manikin_id;
+void Manikin::onNewPhysiologyModification(AMM::PhysiologyModification &pm, SampleInfo_t *info) {	
 	std::string location;
 	std::string practitioner;
 
@@ -426,8 +421,6 @@ void Manikin::onNewOmittedEvent(AMM::OmittedEvent &oe, SampleInfo_t *info) {
 	er.agent_type(oe.agent_type());
 	er.data(oe.data());
 
-	LOG_DEBUG << "Received an omitted event record of type " << er.type() << " from manikin " << manikin_id;
-
 	{
 		std::lock_guard <std::mutex> erLock(m_eventRecordMutex);
 		eventRecords[er.id().id()] = er;
@@ -452,7 +445,7 @@ void Manikin::onNewOmittedEvent(AMM::OmittedEvent &oe, SampleInfo_t *info) {
 	           << std::endl;
 	string stringOut = messageOut.str();
 
-	LOG_DEBUG << "Received an EventRecord via DDS, republishing to TCP clients: " << stringOut;
+	LOG_DEBUG << "Received an omitted EventRecord via DDS, republishing to TCP clients: " << stringOut;
 
 	// Create a local copy of client information
 	std::vector <std::pair<std::string, Client *>> clientsToSend;
@@ -488,8 +481,6 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
 	std::string eData;
 	std::string pType;
 
-	LOG_DEBUG << "Received an event record of type " << er.type()
-	          << " from manikin " << manikin_id;
 
 	{
 		std::lock_guard <std::mutex> erLock(m_eventRecordMutex);
