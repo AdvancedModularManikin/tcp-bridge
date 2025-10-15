@@ -18,7 +18,6 @@
 #include <boost/assign/std/vector.hpp>
 #include <boost/serialization/map.hpp>
 #include <boost/foreach.hpp>
-#include <boost/bind.hpp>
 #include <boost/asio.hpp>
 #include <boost/thread.hpp>
 
