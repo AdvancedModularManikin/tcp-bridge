@@ -52,7 +52,7 @@ const size_t MAX_CLIENT_NAME_LENGTH = 128;
 // Network configuration constants
 const int DEFAULT_SERVER_PORT = 9015;
 const int DEFAULT_DISCOVERY_PORT = 8888;
-const int DEFAULT_CLIENT_SELECT_TIMEOUT_SEC = 30;
+const int DEFAULT_CLIENT_SELECT_TIMEOUT_SEC = 10;  // Send keepalive every 10 seconds
 
 // Connection management constants  
 const int DEFAULT_INACTIVITY_TIMEOUT_MIN = 10;
