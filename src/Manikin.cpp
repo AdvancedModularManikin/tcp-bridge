@@ -842,6 +842,7 @@ void Manikin::SendModuleConfiguration(const std::string &name,
 }
 
 void Manikin::DispatchRequest(Client *c, const std::string &request, std::string mid) {
+	LOG_INFO << "DispatchRequest.";
 	if (!c) {
 		LOG_ERROR << "Null client pointer passed to DispatchRequest";
 		return;
@@ -852,6 +853,8 @@ void Manikin::DispatchRequest(Client *c, const std::string &request, std::string
 		return;
 	}
 
+	LOG_INFO << "Dispatch request. client is not null and request is not empty.";
+	LOG_INFO << "Request: " << reqeust;
 	if (boost::starts_with(request, "STATUS")) {
 		std::string currentStatusValue;
 		std::string currentScenarioValue;
@@ -927,13 +930,14 @@ void Manikin::DispatchRequest(Client *c, const std::string &request, std::string
 		for (const auto &lab: labValuesCopy) {
 			std::ostringstream messageOut;
 			messageOut << lab.first << "=" << lab.second;
+			messageOut << ":" << labCategory;
 
 			if (!mid.empty()) {
 				messageOut << ";mid=" << mid;
 			}
 
-			messageOut << ":";
-			//Server::SendToClient(c, messageOut.str());
+			messageOut << "|";
+			Server::SendToClient(c, messageOut.str());
 		}
 
 		messageOut << "|";
