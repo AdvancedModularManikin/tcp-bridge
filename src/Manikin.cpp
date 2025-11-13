@@ -927,6 +927,7 @@ void Manikin::DispatchRequest(Client *c, const std::string &request, std::string
 		for (const auto &lab: labValuesCopy) {
 			std::ostringstream messageOut;
 			messageOut << lab.first << "=" << lab.second;
+			messageOut << ":" << labCategory;
 
 			if (!mid.empty()) {
 				messageOut << ";mid=" << mid;
