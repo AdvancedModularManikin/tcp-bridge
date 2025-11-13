@@ -932,9 +932,12 @@ void Manikin::DispatchRequest(Client *c, const std::string &request, std::string
 				messageOut << ";mid=" << mid;
 			}
 
-			messageOut << "|";
-			Server::SendToClient(c, messageOut.str());
+			messageOut << ":";
+			//Server::SendToClient(c, messageOut.str());
 		}
+
+		messageOut << "|";
+		Server::SendToclient(c, messageOut.str());
 	} else {
 		LOG_WARNING << "Unknown request type: " << request;
 	}
