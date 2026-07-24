@@ -1,5 +1,7 @@
 #include "Manikin.h"
 
+#include <cmath>
+
 using namespace AMM;
 
 namespace bp = boost::process;
@@ -54,9 +56,13 @@ Manikin::Manikin(const std::string &mid, bool pm, std::string pid) {
 		mgr->CreateCommandPublisher();
 		mgr->CreateInstrumentDataPublisher();
 		mgr->CreateAssessmentPublisher();
+		mgr->CreatePhysiologyValuePublisher();
 		m_uuid.id(AMM::DDSManager<Manikin>::GenerateUuidString());
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
+		// Initialize lab nodes so clients can request labs immediately
+		InitializeLabNodes();
 	}
 	catch (const std::exception &e) {
 		LOG_ERROR << "Error initializing DDSManager: " << e.what();
@@ -861,11 +867,34 @@ void Manikin::SendCommand(const std::string &message) const {
 }
 
 void Manikin::SendModuleConfiguration(const std::string &name,
-                                      const std::string &config) const {
+                                      const std::string &config) const {						
 	AMM::ModuleConfiguration mc;
 	mc.name(name);
 	mc.capabilities_configuration(config);
 	mgr->WriteModuleConfiguration(mc);
+}
+
+void Manikin::SendPhysiologyValue(const std::string &node, double value) {
+		if (!mgr) {
+			LOG_ERROR << "DDS manager not initialized";
+			return;
+		}
+		
+		if (node.empty()) {
+			LOG_ERROR << "SendPhysiologyValue called with empty node name; skipping.";
+			return;
+		}
+		
+		if (!std::isfinite(value)) {
+			LOG_ERROR << "SendPhysiologyValue called with non-finite value for node '"
+			          << node << "'; skipping.";
+			return;
+		}
+
+		AMM::PhysiologyValue dataInstance;
+		dataInstance.name(node);
+		dataInstance.value(value);
+		mgr->WritePhysiologyValue(dataInstance);
 }
 
 void Manikin::DispatchRequest(Client *c, const std::string &request, std::string mid) {

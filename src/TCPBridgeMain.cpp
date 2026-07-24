@@ -54,7 +54,28 @@ const int DEFAULT_SERVER_PORT = 9015;
 const int DEFAULT_DISCOVERY_PORT = 8888;
 const int DEFAULT_CLIENT_SELECT_TIMEOUT_SEC = 10;  // Send keepalive every 10 seconds
 
-// Connection management constants  
+// Connection management and keepalive constants
+//
+// The TCP Bridge uses a three-layer keepalive system to ensure robust connection monitoring:
+//
+// 1. APPLICATION-LEVEL KEEPALIVE (active probing):
+//    - Server sends [KEEPALIVE]\n messages every 10 seconds when client is silent
+//    - Detects broken connections immediately when send() fails
+//    - Tracks consecutive EAGAIN/EWOULDBLOCK failures (max 3) to handle slow clients
+//
+// 2. OS-LEVEL TCP KEEPALIVE (passive detection):
+//    - Starts probing after 60s of socket idle time
+//    - Sends 6 probes at 10-second intervals
+//    - Total detection time: 60s + (6 × 10s) = 120s for completely dead connections
+//
+// 3. INACTIVITY TIMEOUT (bidirectional silence detection):
+//    - Disconnects clients that send NO messages for 10 minutes
+//    - Only counts actual client-originated messages (not server keepalives)
+//    - Protects against clients that receive but never send
+//
+// Note: Keepalive is asymmetric (server → client only). Clients rely on detecting
+// send failures or lack of expected data to detect server failures.
+//
 const int DEFAULT_INACTIVITY_TIMEOUT_MIN = 10;
 const int DEFAULT_KEEPALIVE_IDLE_SEC = 60;
 const int DEFAULT_KEEPALIVE_INTERVAL_SEC = 10;
@@ -446,8 +467,48 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 		return tmgr->SendCommand(message);
 	}
 
+
 	std::map<std::string, std::string> kvp;
 	parseKeyValuePairs(message, kvp);
+
+
+	// Special handling for physiology
+	// [AMM_Node_Data]nodepath={mohsesNodePath};value={value}";
+	if (topic == "AMM_Node_Data") {
+		LOG_DEBUG << "Received physiology: " << message;
+
+		auto nodeIt = kvp.find("nodepath");
+		if (nodeIt == kvp.end() || nodeIt->second.empty()) {
+			LOG_ERROR << "AMM_Node_Data message missing nodepath from client " << c->id;
+			return;
+		}
+		const std::string &nodepath = nodeIt->second;
+
+		auto valueIt = kvp.find("value");
+		if (valueIt == kvp.end() || valueIt->second.empty()) {
+			LOG_ERROR << "AMM_Node_Data message missing value for nodepath '" << nodepath
+			          << "' from client " << c->id;
+			return;
+		}
+
+		double value;
+		try {
+			size_t pos = 0;
+			value = std::stod(valueIt->second, &pos);
+			if (pos != valueIt->second.length()) {
+				LOG_ERROR << "AMM_Node_Data value '" << valueIt->second << "' for nodepath '"
+				          << nodepath << "' has trailing characters from client " << c->id;
+				return;
+			}
+		} catch (const std::exception &e) {
+			LOG_ERROR << "Failed to parse AMM_Node_Data value '" << valueIt->second
+			          << "' for nodepath '" << nodepath << "' from client " << c->id << ": " << e.what();
+			return;
+		}
+
+		tmgr->SendPhysiologyValue(nodepath, value);
+		return;
+	}
 
 	AMM::UUID erID;
 	std::string eventId = kvp["event_id"];
@@ -601,6 +662,8 @@ void *Server::HandleClient(void *args) {
 			fcntl(c->sock, F_SETFL, flags | O_NONBLOCK);
 
 			// Ensure TCP keepalive is enabled to detect dead peers
+			// OS-level keepalive: starts after 60s idle, sends 6 probes at 10s intervals
+			// Total timeout: 60s + (6 * 10s) = 120s to detect dead connection
 			int keepalive = 1;
 			int keepidle = DEFAULT_KEEPALIVE_IDLE_SEC;
 			int keepintvl = DEFAULT_KEEPALIVE_INTERVAL_SEC;
@@ -621,9 +684,19 @@ void *Server::HandleClient(void *args) {
 			setsockopt(c->sock, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
 #endif
 
-			// Variables for detecting client inactivity
-			auto lastActivity = std::chrono::steady_clock::now();
+			// Keepalive system uses three layers:
+			// 1. Application-level: Server sends [KEEPALIVE] every 10s (one-way from server to client)
+			// 2. OS TCP keepalive: Detects dead connections at TCP layer
+			// 3. Inactivity timeout: Disconnect clients that don't send ANY messages for 10 minutes
+			//
+			// Note: Receiving data (including our own keepalives echoed back) does NOT reset the
+			// inactivity timer - only actual client-originated messages count as activity.
+			auto lastClientMessage = std::chrono::steady_clock::now();
 			const auto maxInactivityDuration = std::chrono::minutes(DEFAULT_INACTIVITY_TIMEOUT_MIN);
+
+			// Track consecutive keepalive send failures (for EAGAIN/EWOULDBLOCK handling)
+			int consecutiveKeepaliveFails = 0;
+			const int MAX_KEEPALIVE_FAILS = 3;
 
 			bool clientActive = true;
 			while (clientActive) {
@@ -642,11 +715,12 @@ void *Server::HandleClient(void *args) {
 				int activity = select(c->sock + 1, &readfds, NULL, NULL, &timeout);
 
 				auto now = std::chrono::steady_clock::now();
-				auto inactivityDuration = now - lastActivity;
+				auto inactivityDuration = now - lastClientMessage;
 
-				// Check if client has been inactive for too long
+				// Check if client has been inactive for too long (no client-originated messages)
 				if (inactivityDuration > maxInactivityDuration) {
-					LOG_WARNING << "Client " << c->id << " inactive for too long, disconnecting";
+					LOG_WARNING << "Client " << c->id << " sent no messages for "
+					           << DEFAULT_INACTIVITY_TIMEOUT_MIN << " minutes, disconnecting";
 					clientActive = false;
 					break;
 				}
@@ -662,24 +736,37 @@ void *Server::HandleClient(void *args) {
 					break;
 				}
 
-				// No data available within timeout
+				// No data available within timeout - send keepalive
 				if (activity == 0) {
 					// Send keepalive message to check connection
 					std::string keepaliveMsg = "[KEEPALIVE]\n";
 					if (send(c->sock, keepaliveMsg.c_str(), keepaliveMsg.length(), 0) < 0) {
-						if (errno != EAGAIN && errno != EWOULDBLOCK) {
+						if (errno == EAGAIN || errno == EWOULDBLOCK) {
+							// Client's receive buffer is full - track consecutive failures
+							consecutiveKeepaliveFails++;
+							if (consecutiveKeepaliveFails >= MAX_KEEPALIVE_FAILS) {
+								LOG_ERROR << "Client " << c->id << " receive buffer full after "
+								         << MAX_KEEPALIVE_FAILS << " attempts, disconnecting";
+								clientActive = false;
+								break;
+							}
+							LOG_WARNING << "Keepalive send to client " << c->id << " would block ("
+							           << consecutiveKeepaliveFails << "/" << MAX_KEEPALIVE_FAILS << ")";
+						} else {
+							// Fatal error (connection broken, etc.)
 							LOG_ERROR << "Error sending keepalive to client " << c->id << ": " << strerror(errno);
 							clientActive = false;
 							break;
 						}
+					} else {
+						// Keepalive sent successfully - reset failure counter
+						consecutiveKeepaliveFails = 0;
 					}
 					continue;
 				}
 
 				// Read data if available
 				if (FD_ISSET(c->sock, &readfds)) {
-					lastActivity = now; // Update last activity time
-
 					// Use non-blocking recv - it will not block since select indicated data is ready
 					n = recv(c->sock, buffer, sizeof(buffer) - 1, 0); // Leave space for null terminator
 
@@ -702,16 +789,16 @@ void *Server::HandleClient(void *args) {
 					// Process received message - ensure null termination
 					buffer[n] = '\0';
 					std::string tempBuffer(buffer, n);
-					
+
 					std::string currentBuffer;
 					{
 						std::lock_guard<std::mutex> lock(globalDataMutex);
 						globalInboundBuffer[c->id] += tempBuffer;
-						
+
 						if (!boost::algorithm::ends_with(globalInboundBuffer[c->id], "\n")) {
 							continue;
 						}
-						
+
 						currentBuffer = globalInboundBuffer[c->id];
 						globalInboundBuffer[c->id].clear();
 					}
@@ -724,7 +811,12 @@ void *Server::HandleClient(void *args) {
 
 						try {
 							processClientMessage(c, message);
-							lastActivity = std::chrono::steady_clock::now(); // Update activity time after successful processing
+
+							// Update lastClientMessage only for non-keepalive messages
+							// This ensures inactivity timeout only triggers when client truly stops communicating
+							if (message.find(keepAlivePrefix) != 0) {
+								lastClientMessage = std::chrono::steady_clock::now();
+							}
 						} catch (std::exception &e) {
 							LOG_ERROR << "Exception while processing client message: " << e.what();
 							// Continue processing other messages despite error

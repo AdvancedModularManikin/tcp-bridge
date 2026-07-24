@@ -91,6 +91,8 @@ public:
 	void SendModuleConfiguration(const std::string &name,
 	                             const std::string &config) const;
 
+	void SendPhysiologyValue(const std::string &node, double value);
+
 private:
 	AMM::UUID m_uuid;
 	std::string parentId;
