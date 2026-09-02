@@ -561,9 +561,12 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	}
 }
 
-// Handler for "KEEPALIVE" messages - do nothing but log it for monitoring purposes
+// Handler for "KEEPALIVE" messages - respond with a keepalive (pong) to the client
 void handleKeepAliveMessage(Client *c) {
-	// LOG_TRACE << "Received KEEPALIVE from client " << c->id;
+    // LOG_TRACE << "Received KEEPALIVE from client " << c->id;
+    // Send a keepalive response back to the client as a pong
+    std::string resp = "[KEEPALIVE]\n";
+    Server::SendToClient(c, resp);
 }
 
 void processClientMessage(Client *c, const std::string &message) {
