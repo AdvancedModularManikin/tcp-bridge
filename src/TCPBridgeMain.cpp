@@ -692,8 +692,8 @@ void *Server::HandleClient(void *args) {
 			// 2. OS TCP keepalive: Detects dead connections at TCP layer
 			// 3. Inactivity timeout: Disconnect clients that don't send ANY messages for 10 minutes
 			//
-			// Note: Receiving data (including our own keepalives echoed back) does NOT reset the
-			// inactivity timer - only actual client-originated messages count as activity.
+			// Note: All received messages (including keepalives) reset the inactivity timer.
+			// The server also responds to client keepalives with a [KEEPALIVE] pong.
 			auto lastClientMessage = std::chrono::steady_clock::now();
 			const auto maxInactivityDuration = std::chrono::minutes(DEFAULT_INACTIVITY_TIMEOUT_MIN);
 
@@ -815,11 +815,9 @@ void *Server::HandleClient(void *args) {
 						try {
 							processClientMessage(c, message);
 
-							// Update lastClientMessage only for non-keepalive messages
-							// This ensures inactivity timeout only triggers when client truly stops communicating
-							if (message.find(keepAlivePrefix) != 0) {
-								lastClientMessage = std::chrono::steady_clock::now();
-							}
+						// Update lastClientMessage for all received messages (including keepalives)
+						// A keepalive from the client proves it is still active
+						lastClientMessage = std::chrono::steady_clock::now();
 						} catch (std::exception &e) {
 							LOG_ERROR << "Exception while processing client message: " << e.what();
 							// Continue processing other messages despite error
