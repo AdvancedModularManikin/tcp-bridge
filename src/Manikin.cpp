@@ -707,7 +707,7 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
 	LOG_INFO << "Simulation control Message came in on manikin " << manikin_id;
 
 	std::string newStatus;
-	bool newIsPaused;
+	bool newIsPaused = false;
 	std::string responseMessage;
 
 	switch (simControl.type()) {
@@ -747,6 +747,11 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
 			LOG_INFO << "\tMessage received; Save sim";
 			//SaveSimulation(doWriteTopic);
 			// No broadcast necessary for SAVE
+			return;
+		}
+
+		default: {
+			LOG_WARNING << "Unknown simulation control type: " << static_cast<int>(simControl.type());
 			return;
 		}
 	}
@@ -1139,7 +1144,7 @@ void Manikin::handleScenarioCommand(const std::string &value) {
 		messageOut << "ACT" << "=" << "[SYS]LOAD_SCENARIO:" << newScenario << ";mid=" << manikin_id << std::endl;
 		LOG_DEBUG << "Sending " << messageOut.str() << " to all TCP clients.";
 		Server::SendToAll(messageOut.str());
-	} else if (!value.compare(0, loadPrefix.size(), loadPrefix)) {
+	} else if (!value.compare(0, loadStatePrefix.size(), loadStatePrefix)) {
 		std::string newState = value.substr(loadStatePrefix.size());
 
 		{
@@ -1183,7 +1188,7 @@ void Manikin::onNewCommand(AMM::Command &c, eprosima::fastrtps::SampleInfo_t *in
 		    value.find("UPDATE_CLIENT") == std::string::npos &&
 		    value.find("KICK") == std::string::npos &&
 		    value.compare(0, loadScenarioPrefix.size(), loadScenarioPrefix) != 0 &&
-		    value.compare(0, loadPrefix.size(), loadPrefix) != 0) {
+		    value.compare(0, loadStatePrefix.size(), loadStatePrefix) != 0) {
 
 			// Generic system message that wasn't handled by any specific handler
 			std::ostringstream messageOut;
@@ -1252,7 +1257,8 @@ void Manikin::handleRemoteCommand(const std::string &value) {
 			LOG_ERROR << "Error disabling remote: " << e.what();
 		}
 	} else if (value.find("ENABLE_REMOTE") != std::string::npos) {
-		std::string remoteData = value.substr(sizeof("ENABLE_REMOTE"));
+		std::size_t remotePos = value.find(';');
+		std::string remoteData = (remotePos != std::string::npos) ? value.substr(remotePos + 1) : "";
 		LOG_INFO << "Enabling remote with options:" << remoteData;
 
 		// Parse the options - no locks needed for this
@@ -1318,7 +1324,8 @@ void Manikin::handleRemoteCommand(const std::string &value) {
 
 void Manikin::handleClientCommand(const std::string &value) {
 	if (value.find("UPDATE_CLIENT") != std::string::npos) {
-		std::string clientData = value.substr(sizeof("UPDATE_CLIENT"));
+		std::size_t clientPos = value.find(';');
+		std::string clientData = (clientPos != std::string::npos) ? value.substr(clientPos + 1) : "";
 		LOG_DEBUG << "Updating client with client data:" << clientData;
 
 		// Parse the client data - this doesn't require locks
@@ -1381,7 +1388,8 @@ void Manikin::handleClientCommand(const std::string &value) {
 		messageOut << "ACT=[SYS]UPDATE_CLIENT" << clientData << ";mid=" << manikin_id << std::endl;
 		Server::SendToAll(messageOut.str());
 	} else if (value.find("KICK") != std::string::npos) {
-		std::string kickC = value.substr(sizeof("KICK"));
+		std::size_t kickPos = value.find(';');
+		std::string kickC = (kickPos != std::string::npos) ? value.substr(kickPos + 1) : "";
 		LOG_INFO << "Got kick via DDS bus command.";
 
 		// Create a copy of the client to kick

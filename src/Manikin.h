@@ -115,7 +115,6 @@ private:
 	const string haltingString = "HALTING_ERROR";
 	const string sysPrefix = "[SYS]";
 	const string actPrefix = "[ACT]";
-	const string loadPrefix = "LOAD_STATE:";
 
 	std::string currentScenario = "NONE";
 	std::string currentState = "NONE";

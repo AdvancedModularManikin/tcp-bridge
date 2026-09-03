@@ -703,6 +703,13 @@ void *Server::HandleClient(void *args) {
 
 			bool clientActive = true;
 			while (clientActive) {
+				// Check if socket was closed by another thread (e.g. SendToClient/SendToAll)
+				if (c->sock <= 0) {
+					LOG_INFO << "Socket for client " << c->id << " was closed, exiting client loop";
+					clientActive = false;
+					break;
+				}
+
 				memset(buffer, 0, sizeof(buffer));
 
 				// Use select() to wait for data with timeout

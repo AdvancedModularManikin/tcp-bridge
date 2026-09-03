@@ -247,9 +247,9 @@ void Server::SendToClient(Client *client, const std::string &message) {
 		}
 
 		if (selectResult == 0) {
-			// Timeout on select - socket not ready for writing, likely disconnected
-			LOG_INFO << "Socket timeout for client " << clientId << " - cleaning up potentially disconnected client";
-			CleanupDisconnectedClient(client);
+			// Timeout on select - socket not ready for writing, skip this message
+			// Actual disconnection is handled by the client thread's keepalive/inactivity logic
+			LOG_DEBUG << "Send timeout for client " << clientId << " - skipping message (socket not ready)";
 			return;
 		}
 
