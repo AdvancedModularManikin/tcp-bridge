@@ -284,6 +284,10 @@ void Manikin::onNewPhysiologyWaveform(AMM::PhysiologyWaveform &n, SampleInfo_t *
 }
 
 void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) {
+	BroadcastPhysiologyValue(n, false);
+}
+
+void Manikin::BroadcastPhysiologyValue(AMM::PhysiologyValue &n, bool force) {
 	// Drop values into the lab sheets (always update lab data)
 	{
 		std::lock_guard <std::mutex> labLock(m_labMutex);
@@ -296,13 +300,14 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
 	}
 
 	// Check rate limiting for subscriptions (rate limited to 1/sec)
+	// Client-originated echoes (force=true) bypass the limiter so they always go out
 	auto now = std::chrono::steady_clock::now();
 	bool shouldSend = true;
 
 	{
 		std::lock_guard<std::mutex> rateLimitLock(m_physioRateLimitMutex);
 		auto it = lastPhysioSendTime.find(n.name());
-		if (it != lastPhysioSendTime.end()) {
+		if (!force && it != lastPhysioSendTime.end()) {
 			auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second);
 			if (elapsed.count() < PHYSIO_RATE_LIMIT_MS) {
 				// Less than rate limit duration since last send - drop this update
@@ -333,7 +338,7 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
 			std::string cid = it.first;
 			std::vector <std::string> subV = subscribedTopics[cid];
 
-			// Check for subscription (always rate limited to 1/sec)
+			// Check if client is subscribed to this node name
 			if (std::find(subV.begin(), subV.end(), n.name()) != subV.end()) {
 				Client *c = Server::GetClientByIndex(cid);
 				if (c) {
@@ -900,6 +905,11 @@ void Manikin::SendPhysiologyValue(const std::string &node, double value) {
 		dataInstance.name(node);
 		dataInstance.value(value);
 		mgr->WritePhysiologyValue(dataInstance);
+
+		// Echo the client-originated value to TCP subscribers, bypassing the
+		// per-node rate limiter (the shared limiter would otherwise drop it
+		// whenever a DDS-driven update for the same node fired recently).
+		BroadcastPhysiologyValue(dataInstance, true);
 }
 
 void Manikin::DispatchRequest(Client *c, const std::string &request, std::string mid) {
