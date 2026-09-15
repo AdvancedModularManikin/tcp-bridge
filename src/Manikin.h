@@ -115,7 +115,6 @@ private:
 	const string haltingString = "HALTING_ERROR";
 	const string sysPrefix = "[SYS]";
 	const string actPrefix = "[ACT]";
-	const string loadPrefix = "LOAD_STATE:";
 
 	std::string currentScenario = "NONE";
 	std::string currentState = "NONE";
@@ -206,4 +205,8 @@ protected:
 
 	/// Event listener for physiology values
 	void onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info);
+
+	/// Broadcast a physiology value to subscribed TCP clients.
+	/// force=true bypasses the per-node rate limiter (used for client-originated echoes).
+	void BroadcastPhysiologyValue(AMM::PhysiologyValue &n, bool force);
 };

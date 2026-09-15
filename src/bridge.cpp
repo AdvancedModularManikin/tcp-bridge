@@ -99,10 +99,8 @@ std::string ExtractIDFromString(std::string in) {
 }
 
 void WritePassword(std::string str) {
-    // Create a secure temporary file using process ID and timestamp
-    std::string filename = "/tmp/.amm_sess_" + std::to_string(getpid()) + "_" + 
-                          std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                              std::chrono::system_clock::now().time_since_epoch()).count()) + ".hash";
+    // Create a secure temporary file using process ID
+    std::string filename = "/tmp/.amm_sess_" + std::to_string(getpid()) + ".hash";
     
     std::ofstream outfile(filename, std::ofstream::binary | std::ios::out);
     if (!outfile) {
@@ -127,15 +125,13 @@ void WritePassword(std::string str) {
 }
 
 std::string ReadPassword() {
-    // Look for session files matching our pattern
+    // Read the session file matching our process ID
     std::string pidStr = std::to_string(getpid());
-    std::string pattern = "/tmp/.amm_sess_" + pidStr;
+    std::string filename = "/tmp/.amm_sess_" + pidStr + ".hash";
     
-    // For now, we'll just try the most recent file
-    // In production, this should be more robust
-    std::ifstream infile("/tmp/.amm_sess.hash");
+    std::ifstream infile(filename);
     if (!infile) {
-        throw std::runtime_error("Password file not found or inaccessible");
+        throw std::runtime_error("Password file not found or inaccessible: " + filename);
     }
     
     std::stringstream buffer;
