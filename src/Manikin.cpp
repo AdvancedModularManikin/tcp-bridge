@@ -57,6 +57,7 @@ Manikin::Manikin(const std::string &mid, bool pm, std::string pid) {
 		mgr->CreateInstrumentDataPublisher();
 		mgr->CreateAssessmentPublisher();
 		mgr->CreatePhysiologyValuePublisher();
+		mgr->CreatePhysiologyWaveformPublisher();
 		m_uuid.id(AMM::DDSManager<Manikin>::GenerateUuidString());
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(250));
@@ -248,6 +249,11 @@ void Manikin::onNewModuleConfiguration(AMM::ModuleConfiguration &mc, SampleInfo_
 }
 
 void Manikin::onNewPhysiologyWaveform(AMM::PhysiologyWaveform &n, SampleInfo_t *info) {
+	BroadcastPhysiologyWaveform(n);
+}
+
+void Manikin::BroadcastPhysiologyWaveform(AMM::PhysiologyWaveform &n) {
+	// Waveforms are high-frequency and are never rate-limited.
 	std::string hfname = "HF_" + n.name();
 
 	// Create a local copy of client information
@@ -890,12 +896,12 @@ void Manikin::SendPhysiologyValue(const std::string &node, double value) {
 			LOG_ERROR << "DDS manager not initialized";
 			return;
 		}
-		
+
 		if (node.empty()) {
 			LOG_ERROR << "SendPhysiologyValue called with empty node name; skipping.";
 			return;
 		}
-		
+
 		if (!std::isfinite(value)) {
 			LOG_ERROR << "SendPhysiologyValue called with non-finite value for node '"
 			          << node << "'; skipping.";
@@ -910,6 +916,31 @@ void Manikin::SendPhysiologyValue(const std::string &node, double value) {
 		mgr->WritePhysiologyValue(dataInstance);
 
 		BroadcastPhysiologyValue(dataInstance, true);
+}
+
+void Manikin::SendPhysiologyWaveform(const std::string &node, double value) {
+		if (!mgr) {
+			LOG_ERROR << "DDS manager not initialized";
+			return;
+		}
+
+		if (node.empty()) {
+			LOG_ERROR << "SendPhysiologyWaveform called with empty node name; skipping.";
+			return;
+		}
+
+		if (!std::isfinite(value)) {
+			LOG_ERROR << "SendPhysiologyWaveform called with non-finite value for node '"
+			          << node << "'; skipping.";
+			return;
+		}
+
+		AMM::PhysiologyWaveform dataInstance;
+		dataInstance.name(node);
+		dataInstance.value(value);
+		mgr->WritePhysiologyWaveform(dataInstance);
+
+		BroadcastPhysiologyWaveform(dataInstance);
 }
 
 void Manikin::DispatchRequest(Client *c, const std::string &request, std::string mid) {

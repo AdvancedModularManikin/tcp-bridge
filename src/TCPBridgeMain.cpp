@@ -472,21 +472,22 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	parseKeyValuePairs(message, kvp);
 
 
-	// Special handling for physiology
-	// [AMM_Node_Data]nodepath={mohsesNodePath};value={value}";
-	if (topic == "AMM_Node_Data") {
+	// Special handling for physiology values and high-frequency physiology waveforms
+	// [AMM_Node_Data]nodepath={mohsesNodePath};value={value}
+	// [AMM_HighFrequency_Node_Data]nodepath={mohsesNodePath};value={value}
+	if (topic == "AMM_Node_Data" || topic == "AMM_HighFrequency_Node_Data") {
 	  //		LOG_DEBUG << "Received physiology: " << message;
 
 		auto nodeIt = kvp.find("nodepath");
 		if (nodeIt == kvp.end() || nodeIt->second.empty()) {
-			LOG_ERROR << "AMM_Node_Data message missing nodepath from client " << c->id;
+			LOG_ERROR << topic << " message missing nodepath from client " << c->id;
 			return;
 		}
 		const std::string &nodepath = nodeIt->second;
 
 		auto valueIt = kvp.find("value");
 		if (valueIt == kvp.end() || valueIt->second.empty()) {
-			LOG_ERROR << "AMM_Node_Data message missing value for nodepath '" << nodepath
+			LOG_ERROR << topic << " message missing value for nodepath '" << nodepath
 			          << "' from client " << c->id;
 			return;
 		}
@@ -496,17 +497,21 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 			size_t pos = 0;
 			value = std::stod(valueIt->second, &pos);
 			if (pos != valueIt->second.length()) {
-				LOG_ERROR << "AMM_Node_Data value '" << valueIt->second << "' for nodepath '"
+				LOG_ERROR << topic << " value '" << valueIt->second << "' for nodepath '"
 				          << nodepath << "' has trailing characters from client " << c->id;
 				return;
 			}
 		} catch (const std::exception &e) {
-			LOG_ERROR << "Failed to parse AMM_Node_Data value '" << valueIt->second
+			LOG_ERROR << "Failed to parse " << topic << " value '" << valueIt->second
 			          << "' for nodepath '" << nodepath << "' from client " << c->id << ": " << e.what();
 			return;
 		}
 
-		tmgr->SendPhysiologyValue(nodepath, value);
+		if (topic == "AMM_HighFrequency_Node_Data") {
+			tmgr->SendPhysiologyWaveform(nodepath, value);
+		} else {
+			tmgr->SendPhysiologyValue(nodepath, value);
+		}
 		return;
 	}
 

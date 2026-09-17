@@ -92,6 +92,7 @@ public:
 	                             const std::string &config) const;
 
 	void SendPhysiologyValue(const std::string &node, double value);
+	void SendPhysiologyWaveform(const std::string &node, double value);
 
 private:
 	AMM::UUID m_uuid;
@@ -209,4 +210,8 @@ protected:
 	/// Broadcast a physiology value to subscribed TCP clients.
 	/// force=true bypasses the per-node rate limiter (used for client-originated echoes).
 	void BroadcastPhysiologyValue(AMM::PhysiologyValue &n, bool force);
+
+	/// Broadcast a physiology waveform to TCP clients subscribed to HF_<nodename>.
+	/// Waveforms are never rate-limited.
+	void BroadcastPhysiologyWaveform(AMM::PhysiologyWaveform &n);
 };
