@@ -180,7 +180,7 @@ void Manikin::onNewStatus(AMM::Status &st, SampleInfo_t *info) {
 	           << std::endl;
 	string stringOut = messageOut.str();
 
-	LOG_TRACE << " Sending status message to clients: " << messageOut.str();
+	//	LOG_TRACE << " Sending status message to clients: " << messageOut.str();
 
 	// Create a local copy of client IDs and their subscribed topics
 	std::vector <std::pair<std::string, Client *>> clientsToSend;
@@ -290,73 +290,74 @@ void Manikin::onNewPhysiologyValue(AMM::PhysiologyValue &n, SampleInfo_t *info) 
 void Manikin::BroadcastPhysiologyValue(AMM::PhysiologyValue &n, bool force) {
 	// Drop values into the lab sheets (always update lab data)
 	{
-		std::lock_guard <std::mutex> labLock(m_labMutex);
-		for (auto &outer_map_pair: labNodes) {
-			if (labNodes[outer_map_pair.first].find(n.name()) !=
-			    labNodes[outer_map_pair.first].end()) {
+	  std::lock_guard <std::mutex> labLock(m_labMutex);
+	  for (auto &outer_map_pair: labNodes) {
+	    if (labNodes[outer_map_pair.first].find(n.name()) !=
+		labNodes[outer_map_pair.first].end()) {
 				labNodes[outer_map_pair.first][n.name()] = n.value();
-			}
-		}
+	    }
+	  }
 	}
 
-	// Check rate limiting for subscriptions (rate limited to 1/sec)
-	// Client-originated echoes (force=true) bypass the limiter so they always go out
 	auto now = std::chrono::steady_clock::now();
 	bool shouldSend = true;
-
+	
 	{
-		std::lock_guard<std::mutex> rateLimitLock(m_physioRateLimitMutex);
-		auto it = lastPhysioSendTime.find(n.name());
-		if (!force && it != lastPhysioSendTime.end()) {
-			auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second);
-			if (elapsed.count() < PHYSIO_RATE_LIMIT_MS) {
-				// Less than rate limit duration since last send - drop this update
-				shouldSend = false;
-			}
-		}
-
-		if (shouldSend) {
-			// Update last send time for this value
-			lastPhysioSendTime[n.name()] = now;
-		}
+	  std::lock_guard<std::mutex> rateLimitLock(m_physioRateLimitMutex);
+	  auto it = lastPhysioSendTime.find(n.name());
+	  if (!force && it != lastPhysioSendTime.end()) {
+	    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second);
+	    if (elapsed.count() < PHYSIO_RATE_LIMIT_MS) {
+	      // Less than rate limit duration since last send - drop this update
+	      shouldSend = false;
+	    }
+	  }
+	  
+	  if (shouldSend) {
+	    // Update last send time for this value
+	    lastPhysioSendTime[n.name()] = now;
+	  }
 	}
-
+	
 	// Only send if rate limit allows
 	if (!shouldSend) {
-		return;
+	  LOG_DEBUG << "Ratelimit blocked " << n.name();
+	  return;
 	}
-
+	
 	// Create a local copy of client information
 	std::vector <std::pair<std::string, Client *>> clientsToSend;
-
+	
 	{
-		std::lock_guard <std::mutex> lock(m_clientMapMutex);
-		std::lock_guard <std::mutex> topicLock(m_topicMutex);
-		std::lock_guard <std::mutex> serverLock(Server::clientsMutex);
-
-		for (auto &it: clientMap) {
-			std::string cid = it.first;
-			std::vector <std::string> subV = subscribedTopics[cid];
-
-			// Check if client is subscribed to this node name
-			if (std::find(subV.begin(), subV.end(), n.name()) != subV.end()) {
-				Client *c = Server::GetClientByIndex(cid);
-				if (c) {
-					clientsToSend.emplace_back(cid, c);
-				}
-			}
-		}
+	  std::lock_guard <std::mutex> lock(m_clientMapMutex);
+	  std::lock_guard <std::mutex> topicLock(m_topicMutex);
+	  std::lock_guard <std::mutex> serverLock(Server::clientsMutex);
+	  
+	  for (auto &it: clientMap) {
+	    std::string cid = it.first;
+	    std::vector <std::string> subV = subscribedTopics[cid];
+	    
+	    // Check if client is subscribed to this node name
+	    if (std::find(subV.begin(), subV.end(), n.name()) != subV.end()) {
+	      Client *c = Server::GetClientByIndex(cid);
+	      if (c) {
+		//		LOG_DEBUG << "Found client subscribed to " << n.name();
+		clientsToSend.emplace_back(cid, c);
+	      }
+	    }
+	  }
 	}
-
+	
 	// Now send to clients without holding the locks
 	for (auto &[cid, client]: clientsToSend) {
-		std::ostringstream messageOut;
-		if (podMode) {
-			messageOut << n.name() << "=" << n.value() << ";mid=" << manikin_id << "|" << std::endl;
-		} else {
-			messageOut << n.name() << "=" << n.value() << "|" << std::endl;
-		}
-		Server::SendToClient(client, messageOut.str());
+	  std::ostringstream messageOut;
+	  if (podMode) {
+	    messageOut << n.name() << "=" << n.value() << ";mid=" << manikin_id << "|" << std::endl;
+	  } else {
+	    messageOut << n.name() << "=" << n.value() << "|" << std::endl;
+	  }
+	  // LOG_DEBUG << "Publishing " << n.name() << " to TCP";
+	  Server::SendToClient(client, messageOut.str());
 	}
 }
 
@@ -385,7 +386,7 @@ void Manikin::onNewPhysiologyModification(AMM::PhysiologyModification &pm, Sampl
 	           << std::endl;
 	string stringOut = messageOut.str();
 
-	LOG_DEBUG << "Received a phys mod via DDS, republishing to TCP clients: " << stringOut;
+//	LOG_DEBUG << "Received a phys mod via DDS, republishing to TCP clients: " << stringOut;
 
 	// Create a local copy of client information
 	std::vector <std::pair<std::string, Client *>> clientsToSend;
@@ -456,7 +457,7 @@ void Manikin::onNewOmittedEvent(AMM::OmittedEvent &oe, SampleInfo_t *info) {
 	           << std::endl;
 	string stringOut = messageOut.str();
 
-	LOG_DEBUG << "Received an omitted EventRecord via DDS, republishing to TCP clients: " << stringOut;
+	//	LOG_DEBUG << "Received an omitted EventRecord via DDS, republishing to TCP clients: " << stringOut;
 
 	// Create a local copy of client information
 	std::vector <std::pair<std::string, Client *>> clientsToSend;
@@ -517,7 +518,7 @@ void Manikin::onNewEventRecord(AMM::EventRecord &er, SampleInfo_t *info) {
 	           << std::endl;
 	string stringOut = messageOut.str();
 
-	LOG_DEBUG << "Received an EventRecord via DDS, republishing to TCP clients: " << stringOut;
+	//	LOG_DEBUG << "Received an EventRecord via DDS, republishing to TCP clients: " << stringOut;
 
 	// Create a local copy of client information
 	std::vector <std::pair<std::string, Client *>> clientsToSend;
@@ -575,7 +576,7 @@ void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo
 	           << std::endl;
 	string stringOut = messageOut.str();
 
-	LOG_DEBUG << "Received an assessment via DDS, republishing to TCP clients: " << stringOut;
+	//	LOG_DEBUG << "Received an assessment via DDS, republishing to TCP clients: " << stringOut;
 
 	// Create a local copy of client information
 	std::vector <std::pair<std::string, Client *>> clientsToSend;
@@ -901,14 +902,13 @@ void Manikin::SendPhysiologyValue(const std::string &node, double value) {
 			return;
 		}
 
+
+		//		LOG_DEBUG << "Publishing physiology " << node << " to DDS";
 		AMM::PhysiologyValue dataInstance;
 		dataInstance.name(node);
 		dataInstance.value(value);
 		mgr->WritePhysiologyValue(dataInstance);
 
-		// Echo the client-originated value to TCP subscribers, bypassing the
-		// per-node rate limiter (the shared limiter would otherwise drop it
-		// whenever a DDS-driven update for the same node fired recently).
 		BroadcastPhysiologyValue(dataInstance, true);
 }
 
@@ -1660,6 +1660,7 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 							
 						}
 					}
+					LOG_DEBUG << "[CLIENT] Subscribing to " << subTopicName;
 					Utility::add_once(subscribedTopics[c->id], subTopicName);
 				}
 			}

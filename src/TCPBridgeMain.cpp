@@ -475,7 +475,7 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	// Special handling for physiology
 	// [AMM_Node_Data]nodepath={mohsesNodePath};value={value}";
 	if (topic == "AMM_Node_Data") {
-		LOG_DEBUG << "Received physiology: " << message;
+	  //		LOG_DEBUG << "Received physiology: " << message;
 
 		auto nodeIt = kvp.find("nodepath");
 		if (nodeIt == kvp.end() || nodeIt->second.empty()) {

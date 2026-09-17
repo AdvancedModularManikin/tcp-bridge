@@ -60,12 +60,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++2a")
 
 FIND_PACKAGE(Boost 1.67.0 REQUIRED COMPONENTS system thread)
 
-if (MSVC)
-    find_package(TinyXML2 REQUIRED NO_SYSTEM_ENVIRONMENT_PATH)
-else ()
-    find_package(TinyXML2 REQUIRED)
-endif ()
-
 find_package(amm_std REQUIRED)
 
 include_directories(${Boost_INCLUDE_DIRS})
