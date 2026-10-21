@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Maps RenderModification types received from TCP clients to a different type
+     before they are published to DDS (and so to other TCP clients). -->
+<RenderModificationMappings>
+   <Map from="ET_TUBE_CORRECT" to="MASK_INSERT_ET_TUBE_CORRECT"/>
+</RenderModificationMappings>
