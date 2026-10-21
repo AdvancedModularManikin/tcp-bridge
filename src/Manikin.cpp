@@ -327,7 +327,7 @@ void Manikin::BroadcastPhysiologyValue(AMM::PhysiologyValue &n, bool force) {
 	
 	// Only send if rate limit allows
 	if (!shouldSend) {
-	  LOG_DEBUG << "Ratelimit blocked " << n.name();
+	  //	  LOG_DEBUG << "Ratelimit blocked " << n.name();
 	  return;
 	}
 	
@@ -1174,7 +1174,7 @@ void Manikin::handleServiceCommand(const std::string &value, const std::string &
 void Manikin::handleScenarioCommand(const std::string &value) {
 	if (!value.compare(0, loadScenarioPrefix.size(), loadScenarioPrefix)) {
 		std::string newScenario = value.substr(loadScenarioPrefix.size());
-		LOG_DEBUG << "Setting scenario: " << newScenario;
+		//		LOG_DEBUG << "Setting scenario: " << newScenario;
 
 		{
 			std::lock_guard <std::mutex> statusLock(m_statusMutex);
@@ -1194,7 +1194,7 @@ void Manikin::handleScenarioCommand(const std::string &value) {
 			currentState = newState;
 		}
 
-		LOG_DEBUG << "Current state is " << loadStatePrefix;
+		//LOG_DEBUG << "Current state is " << loadStatePrefix;
 		std::ostringstream messageOut;
 		messageOut << "ACT" << "=" << "[SYS]LOAD_STATE:" << newState << ";mid=" << manikin_id << std::endl;
 		LOG_DEBUG << "Sending " << messageOut.str() << " to all TCP clients.";
