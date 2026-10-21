@@ -57,6 +57,17 @@ std::vector <std::string> split(const std::string &s, char delim);
 
 std::string ExtractTypeFromRenderMod(std::string payload);
 
+// Render modification type mappings (e.g. ET_TUBE_CORRECT -> MASK_INSERT_ET_TUBE_CORRECT).
+// Load once at startup; lookups are read-only afterwards.
+void LoadRenderModMappings(const std::string &path);
+
+// Returns the mapped type, or the input unchanged if there is no mapping.
+std::string MapRenderModType(const std::string &type);
+
+// Rewrites the type attribute of a <RenderModification .../> payload using the
+// mappings. Returns the payload unchanged if it is not parseable or unmapped.
+std::string MapRenderModPayload(const std::string &payload);
+
 std::string ExtractIDFromString(std::string in);
 
 std::string gen_random(const int len);

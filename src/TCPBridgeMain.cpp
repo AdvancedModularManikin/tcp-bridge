@@ -543,6 +543,10 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	}
 
 	if (topic == "AMM_Render_Modification") {
+		// Apply configured type mappings before anything is published to DDS
+		// (which is also what gets republished to the other TCP clients).
+		modType = MapRenderModType(modType);
+		modPayload = MapRenderModPayload(modPayload);
 		tmgr->SendEventRecord(erID, fma, agentID, modType);
 		if (modPayload.empty()) { // make a render mod payload
 			std::ostringstream tPayload;
@@ -957,6 +961,8 @@ int main(int argc, const char *argv[]) {
 
 	DEFAULT_MANIKIN_ID = manikinId;
 	CORE_ID = coreId;
+
+	LoadRenderModMappings("config/tcp_bridge_render_mappings.xml");
 
 	LOG_INFO << "=== [AMM - TCP Bridge] ===";
 	try {

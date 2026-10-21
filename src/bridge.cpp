@@ -3,6 +3,55 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <chrono>
+#include <tinyxml2.h>
+#include "amm/BaseLogger.h"
+
+static std::map<std::string, std::string> renderModMappings;
+
+void LoadRenderModMappings(const std::string &path) {
+    renderModMappings.clear();
+    tinyxml2::XMLDocument doc;
+    if (doc.LoadFile(path.c_str()) != tinyxml2::XML_SUCCESS) {
+        LOG_WARNING << "No render modification mappings loaded from " << path << ": " << doc.ErrorStr();
+        return;
+    }
+    tinyxml2::XMLElement *root = doc.FirstChildElement("RenderModificationMappings");
+    if (!root) {
+        LOG_ERROR << "Missing RenderModificationMappings root element in " << path;
+        return;
+    }
+    for (tinyxml2::XMLElement *m = root->FirstChildElement("Map"); m; m = m->NextSiblingElement("Map")) {
+        const char *from = m->Attribute("from");
+        const char *to = m->Attribute("to");
+        if (!from || !to || !*from || !*to) {
+            LOG_WARNING << "Skipping render modification mapping with missing from/to in " << path;
+            continue;
+        }
+        renderModMappings[from] = to;
+        LOG_INFO << "Render modification mapping: " << from << " -> " << to;
+    }
+}
+
+std::string MapRenderModType(const std::string &type) {
+    auto it = renderModMappings.find(type);
+    return it == renderModMappings.end() ? type : it->second;
+}
+
+std::string MapRenderModPayload(const std::string &payload) {
+    if (renderModMappings.empty()) return payload;
+    tinyxml2::XMLDocument doc;
+    if (doc.Parse(payload.c_str()) != tinyxml2::XML_SUCCESS) return payload;
+    tinyxml2::XMLElement *root = doc.FirstChildElement("RenderModification");
+    if (!root) return payload;
+    const char *type = root->Attribute("type");
+    if (!type) return payload;
+    auto it = renderModMappings.find(type);
+    if (it == renderModMappings.end()) return payload;
+    root->SetAttribute("type", it->second.c_str());
+    tinyxml2::XMLPrinter printer(nullptr, true);
+    doc.Print(&printer);
+    return printer.CStr();
+}
 
 std::mutex gcMapMutex;
 
