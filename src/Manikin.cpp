@@ -1691,7 +1691,7 @@ void Manikin::HandleCapabilities(Client *c, std::string const &capabilityVal) {
 							
 						}
 					}
-					LOG_DEBUG << "[CLIENT] Subscribing to " << subTopicName;
+					//					LOG_DEBUG << "[CLIENT] Subscribing to " << subTopicName;
 					Utility::add_once(subscribedTopics[c->id], subTopicName);
 				}
 			}
