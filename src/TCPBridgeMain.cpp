@@ -448,7 +448,7 @@ void parseKeyValuePairs(const std::string &message, std::map<std::string, std::s
 			}
 		} else {
 			// Log a warning and skip malformed tokens entirely
-			LOG_WARNING << "Malformed token in message (skipping): " << token;
+		  //			LOG_WARNING << "Malformed token in message (skipping): " << token;
 		}
 	}
 }
