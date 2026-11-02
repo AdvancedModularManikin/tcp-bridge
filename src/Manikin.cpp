@@ -1,5 +1,6 @@
 #include "Manikin.h"
 
+#include <cctype>
 #include <cmath>
 
 using namespace AMM;
@@ -611,6 +612,62 @@ void Manikin::onNewAssessment(AMM::Assessment &a, eprosima::fastrtps::SampleInfo
 	}
 }
 
+// Lower-cases attribute names in every start tag of an XML string, leaving
+// element names, attribute values, text, comments, CDATA and PIs untouched.
+static std::string lowercaseXmlAttributeNames(const std::string &xml) {
+	std::string out;
+	out.reserve(xml.size());
+	const size_t n = xml.size();
+	size_t i = 0;
+
+	auto isSpace = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+
+	while (i < n) {
+		if (xml[i] != '<') {
+			out += xml[i++];
+			continue;
+		}
+
+		// Comments, CDATA, PIs, DOCTYPE, end tags: copy verbatim through their terminator
+		if (i + 1 < n && (xml[i + 1] == '/' || xml[i + 1] == '!' || xml[i + 1] == '?')) {
+			std::string term = ">";
+			if (xml.compare(i, 4, "<!--") == 0) term = "-->";
+			else if (xml.compare(i, 9, "<![CDATA[") == 0) term = "]]>";
+			else if (xml.compare(i, 2, "<?") == 0) term = "?>";
+			size_t end = xml.find(term, i);
+			end = (end == std::string::npos) ? n : end + term.size();
+			out.append(xml, i, end - i);
+			i = end;
+			continue;
+		}
+
+		// Start tag: copy '<' and element name
+		out += xml[i++];
+		while (i < n && !isSpace(xml[i]) && xml[i] != '>' && xml[i] != '/') out += xml[i++];
+
+		// Attributes
+		while (i < n && xml[i] != '>') {
+			if (isSpace(xml[i]) || xml[i] == '/') {
+				out += xml[i++];
+			} else if (xml[i] == '=') {
+				out += xml[i++];
+				while (i < n && isSpace(xml[i])) out += xml[i++];
+				if (i < n && (xml[i] == '\'' || xml[i] == '"')) {
+					char q = xml[i];
+					size_t end = xml.find(q, i + 1);
+					end = (end == std::string::npos) ? n : end + 1;
+					out.append(xml, i, end - i);
+					i = end;
+				}
+			} else {
+				out += static_cast<char>(std::tolower(static_cast<unsigned char>(xml[i++])));
+			}
+		}
+		if (i < n) out += xml[i++]; // '>'
+	}
+	return out;
+}
+
 void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleInfo_t *info) {
 	std::string location;
 	std::string practitioner;
@@ -631,7 +688,7 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 		rendModPayload = "<RenderModification type='" + rendMod.type() + "'/>";
 		rendModType = "";
 	} else {
-		rendModPayload = rendMod.data();
+		rendModPayload = lowercaseXmlAttributeNames(rendMod.data());
 		// rendModType = rendMod.type();
 		rendModType = "";
 	}
