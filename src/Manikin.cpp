@@ -688,7 +688,7 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 		rendModPayload = "<RenderModification type='" + rendMod.type() + "'/>";
 		rendModType = "";
 	} else {
-		rendModPayload = lowercaseXmlAttributeNames(rendMod.data());
+		rendModPayload = lowercaseXmlAttributeNames(std::string(rendMod.data().c_str()));
 		// rendModType = rendMod.type();
 		rendModType = "";
 	}
