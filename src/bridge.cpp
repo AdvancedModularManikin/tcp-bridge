@@ -69,16 +69,22 @@ std::string MapRenderModPayload(const std::string &payload, std::string *mappedT
     if (doc.Parse(payload.c_str()) != tinyxml2::XML_SUCCESS) return payload;
     tinyxml2::XMLElement *root = doc.FirstChildElement("RenderModification");
     if (!root) return payload;
-    const char *type = root->Attribute("type");
-    if (!type) return payload;
-    const char *state = root->Attribute("state");
-    const RenderModMapping *m = FindRenderModMapping(type, state ? state : "");
+    const char *typeAttr = root->Attribute("type");
+    if (!typeAttr) return payload;
+    // Copy: the attribute pointers are invalidated by SetAttribute below.
+    const std::string type = typeAttr;
+    const char *stateAttr = root->Attribute("state");
+    const std::string state = stateAttr ? stateAttr : "";
+    const RenderModMapping *m = FindRenderModMapping(type, state);
+    LOG_DEBUG << "Render modification received: type=" << type << " state=" << (stateAttr ? state : "<none>");
     if (!m) return payload;
     root->SetAttribute("type", m->to.c_str());
     if (!m->toState.empty()) root->SetAttribute("state", m->toState.c_str());
     if (mappedType) *mappedType = m->to;
     tinyxml2::XMLPrinter printer(nullptr, true);
     doc.Print(&printer);
+    LOG_INFO << "Render modification mapped: type=" << type << " state=" << (stateAttr ? state : "<none>")
+             << " -> " << printer.CStr();
     return printer.CStr();
 }
 
