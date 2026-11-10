@@ -545,8 +545,9 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	if (topic == "AMM_Render_Modification") {
 		// Apply configured type mappings before anything is published to DDS
 		// (which is also what gets republished to the other TCP clients).
-		modType = MapRenderModType(modType);
-		modPayload = MapRenderModPayload(modPayload);
+		std::string mappedType;
+		modPayload = MapRenderModPayload(modPayload, &mappedType);
+		modType = mappedType.empty() ? MapRenderModType(modType) : mappedType;
 		tmgr->SendEventRecord(erID, fma, agentID, modType);
 		if (modPayload.empty()) { // make a render mod payload
 			std::ostringstream tPayload;

@@ -64,9 +64,12 @@ void LoadRenderModMappings(const std::string &path);
 // Returns the mapped type, or the input unchanged if there is no mapping.
 std::string MapRenderModType(const std::string &type);
 
-// Rewrites the type attribute of a <RenderModification .../> payload using the
-// mappings. Returns the payload unchanged if it is not parseable or unmapped.
-std::string MapRenderModPayload(const std::string &payload);
+// Rewrites the type (and, if the mapping has toState, the state) attribute of a
+// <RenderModification .../> payload using the mappings. A mapping with fromState
+// only matches payloads with that state. If a mapping applied, *mappedType (when
+// non-null) is set to the new type. Returns the payload unchanged if it is not
+// parseable or unmapped.
+std::string MapRenderModPayload(const std::string &payload, std::string *mappedType = nullptr);
 
 std::string ExtractIDFromString(std::string in);
 

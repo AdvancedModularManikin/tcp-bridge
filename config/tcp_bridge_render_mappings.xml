@@ -3,4 +3,7 @@
      before they are published to DDS (and so to other TCP clients). -->
 <RenderModificationMappings>
    <Map from="ET_TUBE_CORRECT" to="MASK_INSERT_ET_TUBE_CORRECT"/>
+   <Map from="Intubation" fromState="Tracheal" to="MASK_INSERT_ET_TUBE_CORRECT" toState="on"/>
+   <Map from="Intubation" fromState="Esophageal" to="MASK_INSERT_ET_TUBE_ESOPH" toState="on"/>
+   <Map from="Intubation" fromState="RMS" to="MASK_INSERT_ET_TUBE_MS" toState="on"/>
 </RenderModificationMappings>

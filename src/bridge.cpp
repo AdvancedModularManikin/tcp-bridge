@@ -6,7 +6,28 @@
 #include <tinyxml2.h>
 #include "amm/BaseLogger.h"
 
-static std::map<std::string, std::string> renderModMappings;
+struct RenderModMapping {
+    std::string from;
+    std::string fromState;  // empty = match any state
+    std::string to;
+    std::string toState;    // empty = leave state unchanged
+};
+
+static std::vector<RenderModMapping> renderModMappings;
+
+// Prefers a mapping that matches both type and state, then a type-only mapping.
+static const RenderModMapping *FindRenderModMapping(const std::string &type, const std::string &state) {
+    const RenderModMapping *typeOnly = nullptr;
+    for (const auto &m : renderModMappings) {
+        if (m.from != type) continue;
+        if (m.fromState.empty()) {
+            if (!typeOnly) typeOnly = &m;
+        } else if (m.fromState == state) {
+            return &m;
+        }
+    }
+    return typeOnly;
+}
 
 void LoadRenderModMappings(const std::string &path) {
     renderModMappings.clear();
@@ -27,17 +48,22 @@ void LoadRenderModMappings(const std::string &path) {
             LOG_WARNING << "Skipping render modification mapping with missing from/to in " << path;
             continue;
         }
-        renderModMappings[from] = to;
-        LOG_INFO << "Render modification mapping: " << from << " -> " << to;
+        const char *fromState = m->Attribute("fromState");
+        const char *toState = m->Attribute("toState");
+        renderModMappings.push_back({from, fromState ? fromState : "", to, toState ? toState : ""});
+        LOG_INFO << "Render modification mapping: " << from
+                 << (fromState ? std::string(" [state=") + fromState + "]" : std::string())
+                 << " -> " << to
+                 << (toState ? std::string(" [state=") + toState + "]" : std::string());
     }
 }
 
 std::string MapRenderModType(const std::string &type) {
-    auto it = renderModMappings.find(type);
-    return it == renderModMappings.end() ? type : it->second;
+    const RenderModMapping *m = FindRenderModMapping(type, "");
+    return m ? m->to : type;
 }
 
-std::string MapRenderModPayload(const std::string &payload) {
+std::string MapRenderModPayload(const std::string &payload, std::string *mappedType) {
     if (renderModMappings.empty()) return payload;
     tinyxml2::XMLDocument doc;
     if (doc.Parse(payload.c_str()) != tinyxml2::XML_SUCCESS) return payload;
@@ -45,9 +71,12 @@ std::string MapRenderModPayload(const std::string &payload) {
     if (!root) return payload;
     const char *type = root->Attribute("type");
     if (!type) return payload;
-    auto it = renderModMappings.find(type);
-    if (it == renderModMappings.end()) return payload;
-    root->SetAttribute("type", it->second.c_str());
+    const char *state = root->Attribute("state");
+    const RenderModMapping *m = FindRenderModMapping(type, state ? state : "");
+    if (!m) return payload;
+    root->SetAttribute("type", m->to.c_str());
+    if (!m->toState.empty()) root->SetAttribute("state", m->toState.c_str());
+    if (mappedType) *mappedType = m->to;
     tinyxml2::XMLPrinter printer(nullptr, true);
     doc.Print(&printer);
     return printer.CStr();
