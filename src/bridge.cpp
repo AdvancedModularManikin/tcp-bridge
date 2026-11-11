@@ -1,4 +1,6 @@
 #include "bridge.h"
+#include <algorithm>
+#include <cctype>
 #include <random>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -69,6 +71,19 @@ std::string MapRenderModPayload(const std::string &payload, std::string *mappedT
     if (doc.Parse(payload.c_str()) != tinyxml2::XML_SUCCESS) return payload;
     tinyxml2::XMLElement *root = doc.FirstChildElement("RenderModification");
     if (!root) return payload;
+    // Clients may send attribute names in any case (e.g. State="on"); rewrite
+    // them lowercase so the lookups and SetAttribute calls below match.
+    std::vector<std::pair<std::string, std::string>> origAttrs;
+    for (const tinyxml2::XMLAttribute *a = root->FirstAttribute(); a; a = a->Next()) {
+        origAttrs.emplace_back(a->Name(), a->Value());
+    }
+    for (const auto &kv : origAttrs) root->DeleteAttribute(kv.first.c_str());
+    for (const auto &kv : origAttrs) {
+        std::string name = kv.first;
+        std::transform(name.begin(), name.end(), name.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        root->SetAttribute(name.c_str(), kv.second.c_str());
+    }
     const char *typeAttr = root->Attribute("type");
     if (!typeAttr) return payload;
     // Copy: the attribute pointers are invalidated by SetAttribute below.
