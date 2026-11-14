@@ -1,6 +1,8 @@
 #include "bridge.h"
 #include <algorithm>
 #include <cctype>
+#include <sstream>
+#include <stdexcept>
 #include <random>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -65,25 +67,28 @@ std::string MapRenderModType(const std::string &type) {
     return m ? m->to : type;
 }
 
+// Rewrites an element's attribute names to lowercase (clients may send e.g. State="on").
+static void LowercaseAttributeNames(tinyxml2::XMLElement *el) {
+    std::vector<std::pair<std::string, std::string>> origAttrs;
+    for (const tinyxml2::XMLAttribute *a = el->FirstAttribute(); a; a = a->Next()) {
+        origAttrs.emplace_back(a->Name(), a->Value());
+    }
+    for (const auto &kv : origAttrs) el->DeleteAttribute(kv.first.c_str());
+    for (const auto &kv : origAttrs) {
+        std::string name = kv.first;
+        std::transform(name.begin(), name.end(), name.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        el->SetAttribute(name.c_str(), kv.second.c_str());
+    }
+}
+
 std::string MapRenderModPayload(const std::string &payload, std::string *mappedType) {
     if (renderModMappings.empty()) return payload;
     tinyxml2::XMLDocument doc;
     if (doc.Parse(payload.c_str()) != tinyxml2::XML_SUCCESS) return payload;
     tinyxml2::XMLElement *root = doc.FirstChildElement("RenderModification");
     if (!root) return payload;
-    // Clients may send attribute names in any case (e.g. State="on"); rewrite
-    // them lowercase so the lookups and SetAttribute calls below match.
-    std::vector<std::pair<std::string, std::string>> origAttrs;
-    for (const tinyxml2::XMLAttribute *a = root->FirstAttribute(); a; a = a->Next()) {
-        origAttrs.emplace_back(a->Name(), a->Value());
-    }
-    for (const auto &kv : origAttrs) root->DeleteAttribute(kv.first.c_str());
-    for (const auto &kv : origAttrs) {
-        std::string name = kv.first;
-        std::transform(name.begin(), name.end(), name.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        root->SetAttribute(name.c_str(), kv.second.c_str());
-    }
+    LowercaseAttributeNames(root);
     const char *typeAttr = root->Attribute("type");
     if (!typeAttr) return payload;
     // Copy: the attribute pointers are invalidated by SetAttribute below.
@@ -101,6 +106,40 @@ std::string MapRenderModPayload(const std::string &payload, std::string *mappedT
     LOG_INFO << "Render modification mapped: type=" << type << " state=" << (stateAttr ? state : "<none>")
              << " -> " << printer.CStr();
     return printer.CStr();
+}
+
+bool BuildVentilationPhysMod(const std::string &renderModPayload, std::string &physModPayload) {
+    tinyxml2::XMLDocument doc;
+    if (doc.Parse(renderModPayload.c_str()) != tinyxml2::XML_SUCCESS) return false;
+    tinyxml2::XMLElement *root = doc.FirstChildElement("RenderModification");
+    if (!root) return false;
+    LowercaseAttributeNames(root);
+    const char *type = root->Attribute("type");
+    const char *rateAttr = root->Attribute("rate");
+    if (!type || !rateAttr || std::string(type) != "Intubation") return false;
+
+    // Only emit a validated number so the value can't inject XML.
+    double rate = 0;
+    try {
+        size_t used = 0;
+        rate = std::stod(rateAttr, &used);
+        if (used != std::string(rateAttr).size()) throw std::invalid_argument("trailing characters");
+    } catch (const std::exception &) {
+        LOG_WARNING << "Intubation render modification has non-numeric rate: " << rateAttr;
+        return false;
+    }
+
+    std::ostringstream out;
+    out << "<PhysiologyModification type=\"Ventilation\">"
+        << "<State>" << (rate == 0 ? "Off" : "On") << "</State>"
+        << "<Rate value=\"" << rate << "\" unit=\"1/min\"/>"
+        << "<InspiratoryExpiratoryRatio>0.5</InspiratoryExpiratoryRatio>"
+        << "<PositiveEndExpiredPressure value=\"5\" unit=\"cmH2O\"/>"
+        << "<VentilatorPressure value=\"20\" unit=\"cmH2O\"/>"
+        << "<OxygenFraction>0.21</OxygenFraction>"
+        << "</PhysiologyModification>";
+    physModPayload = out.str();
+    return true;
 }
 
 std::mutex gcMapMutex;

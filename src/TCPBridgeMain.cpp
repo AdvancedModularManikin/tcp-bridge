@@ -543,6 +543,17 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 	}
 
 	if (topic == "AMM_Render_Modification") {
+		// Intubation + rate is also a ventilator command: additionally publish a
+		// Ventilation physiology modification. The render modification below is
+		// still published for other clients. No loop: this only runs on messages
+		// received from TCP clients, and the DDS subscribers only forward to TCP
+		// clients; they never call this handler.
+		std::string ventPayload;
+		if (BuildVentilationPhysMod(modPayload, ventPayload)) {
+			LOG_INFO << "Intubation render modification also published as Ventilation physiology modification: " << ventPayload;
+			tmgr->SendEventRecord(erID, fma, agentID, "Ventilation");
+			tmgr->SendPhysiologyModification(erID, "Ventilation", ventPayload);
+		}
 		// Apply configured type mappings before anything is published to DDS
 		// (which is also what gets republished to the other TCP clients).
 		std::string mappedType;

@@ -71,6 +71,11 @@ std::string MapRenderModType(const std::string &type);
 // parseable or unmapped.
 std::string MapRenderModPayload(const std::string &payload, std::string *mappedType = nullptr);
 
+// One-off special case: an <RenderModification type="Intubation" rate="N"/> is a
+// ventilator command. On match, fills physModPayload with a Ventilation
+// <PhysiologyModification> (State Off when rate is 0, otherwise On) and returns true.
+bool BuildVentilationPhysMod(const std::string &renderModPayload, std::string &physModPayload);
+
 std::string ExtractIDFromString(std::string in);
 
 std::string gen_random(const int len);
