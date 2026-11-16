@@ -136,7 +136,7 @@ bool BuildVentilationPhysMod(const std::string &renderModPayload, std::string &p
         << "<InspiratoryExpiratoryRatio>0.5</InspiratoryExpiratoryRatio>"
         << "<PositiveEndExpiredPressure value=\"5\" unit=\"cmH2O\"/>"
         << "<VentilatorPressure value=\"20\" unit=\"cmH2O\"/>"
-        << "<OxygenFraction>0.21</OxygenFraction>"
+        << "<OxygenFraction>0.5</OxygenFraction>"
         << "</PhysiologyModification>";
     physModPayload = out.str();
     return true;
