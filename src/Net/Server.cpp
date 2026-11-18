@@ -188,6 +188,36 @@ void Server::AcceptAndDispatch() {
 }
 
 
+// Tracks when each client's socket first became unwritable (send buffer full because
+// the client is not reading). Keyed by client id; protected by its own mutex because
+// SendToClient is called from multiple DDS callback threads.
+static std::mutex sendStallMutex;
+static std::unordered_map<std::string, std::chrono::steady_clock::time_point> sendStallSince;
+
+static void ClearSendStall(const std::string &clientId) {
+	std::lock_guard<std::mutex> lock(sendStallMutex);
+	sendStallSince.erase(clientId);
+}
+
+// Records a failed (not-writable) send. Returns true once the client has been
+// continuously stalled for DEFAULT_SEND_STALL_DISCONNECT_SEC.
+static bool RecordSendStall(const std::string &clientId) {
+	auto now = std::chrono::steady_clock::now();
+	std::lock_guard<std::mutex> lock(sendStallMutex);
+	auto it = sendStallSince.emplace(clientId, now).first;
+	return now - it->second >= std::chrono::seconds(DEFAULT_SEND_STALL_DISCONNECT_SEC);
+}
+
+// Disconnects a client whose socket has not accepted data for too long. The socket is
+// shut down (not just dropped from the list) so the peer sees the close and the client
+// thread's recv returns 0 and performs the normal cleanup.
+static void DisconnectStalledClient(int sock, const std::string &clientId) {
+	LOG_WARNING << "Client " << clientId << " has not accepted data for "
+	            << DEFAULT_SEND_STALL_DISCONNECT_SEC << "s (not reading) - disconnecting";
+	ClearSendStall(clientId);
+	shutdown(sock, SHUT_RDWR);
+}
+
 // Send a message to a specific client
 void Server::SendToClient(Client *client, const std::string &message) {
 	if (!client) return;
@@ -250,6 +280,7 @@ void Server::SendToClient(Client *client, const std::string &message) {
 			// Timeout on select - socket not ready for writing, skip this message
 			// Actual disconnection is handled by the client thread's keepalive/inactivity logic
 			LOG_DEBUG << "Send timeout for client " << clientId << " - skipping message (socket not ready)";
+			if (RecordSendStall(clientId)) DisconnectStalledClient(clientSocket, clientId);
 			return;
 		}
 
@@ -263,14 +294,17 @@ void Server::SendToClient(Client *client, const std::string &message) {
 					CleanupDisconnectedClient(client);
 				} else if (errno == EAGAIN || errno == EWOULDBLOCK) {
 					LOG_DEBUG << "Send would block for client " << clientId << " - skipping message";
+					if (RecordSendStall(clientId)) DisconnectStalledClient(clientSocket, clientId);
 				} else {
 					LOG_ERROR << "Error sending to client " << clientId << ": " << strerror(errno);
 				}
 			} else if (sent < static_cast<ssize_t>(message.length())) {
 				LOG_WARNING << "Incomplete send to client " << clientId << ": sent " << sent << " of "
 				            << message.length() << " bytes";
+				ClearSendStall(clientId); // data was accepted, so the client is still reading
 			} else {
 			  // LOG_TRACE << "Successfully sent " << sent << " bytes to client " << clientId;
+				ClearSendStall(clientId);
 			}
 		}
 	} catch (const std::exception &e) {
@@ -341,6 +375,7 @@ void Server::RemoveClient(Client *client) {
 		// Remove from both containers
 		clients.erase(clients.begin() + index);
 		clientsById.erase(client->id);
+		ClearSendStall(client->id);
 		LOG_INFO << "Client removed: " << client->id;
 	} else {
 		LOG_ERROR << "Client not found for removal: " << client->id;

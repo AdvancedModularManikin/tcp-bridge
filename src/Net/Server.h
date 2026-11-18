@@ -30,6 +30,7 @@
 const int DEFAULT_SERVER_BACKLOG = 30;
 const int DEFAULT_UDP_SELECT_TIMEOUT_SEC = 1;
 const int DEFAULT_SEND_SELECT_TIMEOUT_USEC = 100000; // 100ms
+const int DEFAULT_SEND_STALL_DISCONNECT_SEC = 30; // disconnect a client that accepts no data for this long
 const int DEFAULT_THREAD_CLEANUP_INTERVAL_SEC = 5;
 const int DEFAULT_ERROR_RETRY_DELAY_MS = 100;
 
