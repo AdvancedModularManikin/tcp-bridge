@@ -704,7 +704,7 @@ void Manikin::onNewRenderModification(AMM::RenderModification &rendMod, SampleIn
 	           << std::endl;
 	string stringOut = messageOut.str();
 
-	if (rendModPayload.find("START_OF") == std::string::npos) {
+	if (rendModPayload.find("START_OF") == std::string::npos && rendModPayload.find("ENVIRONMENTAL_SENSOR_DATA") == std::string::npos) {
 		LOG_INFO << "Render mod Message came in on manikin " << manikin_id << ", republishing to TCP: "
 		         << stringOut;
 	} else {

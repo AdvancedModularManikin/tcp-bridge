@@ -577,6 +577,8 @@ void handleModificationMessage(Client *c, const std::string &message, const std:
 		tmgr->SendCommand(message);
 	} else if (topic == "AMM_ModuleConfiguration") {
 		tmgr->SendModuleConfiguration(modType, modPayload);
+	} else if (topic == "WHIP_DIAG") {
+	  LOG_DEBUG << message;
 	} else {
 		LOG_WARNING << "Unknown modification topic: " << topic;
 	}
