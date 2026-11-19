@@ -72,9 +72,16 @@ std::string MapRenderModType(const std::string &type);
 std::string MapRenderModPayload(const std::string &payload, std::string *mappedType = nullptr);
 
 // One-off special case: an <RenderModification type="Intubation" rate="N"/> is a
-// ventilator command. On match, fills physModPayload with a Ventilation
-// <PhysiologyModification> (State Off when rate is 0, otherwise On) and returns true.
+// ventilator command. Returns true and fills physModPayload only when a Ventilation
+// <PhysiologyModification> should be sent:
+//  - N > 10: sent ONCE (State On, Rate 16 regardless of N); later N > 10 messages return
+//    false until ventilation is stopped or the flag is cleared.
+//  - N == 0: State Off, Rate 0; clears the ventilation flag.
+//  - otherwise: returns false.
 bool BuildVentilationPhysMod(const std::string &renderModPayload, std::string &physModPayload);
+
+// Clears the "ventilation active" flag (call on RESET_SIM / LOAD_SCENARIO).
+void ClearVentilationFlag();
 
 std::string ExtractIDFromString(std::string in);
 

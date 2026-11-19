@@ -805,6 +805,7 @@ void Manikin::onNewSimulationControl(AMM::SimulationControl &simControl, SampleI
 			newIsPaused = false;
 			LOG_INFO << "\tMessage received; Reset sim";
 			responseMessage = "[SYS]RESET_SIM";
+			ClearVentilationFlag();
 
 			// Initialize lab nodes when resetting - use a separate locked operation
 			InitializeLabNodes();
@@ -1150,6 +1151,7 @@ void Manikin::handleSimulationCommand(const std::string &value, const std::strin
 		std::string tmsg = "ACT=PAUSE_SIM;mid=" + manikin_id;
 		Server::SendToAll(tmsg);
 	} else if (value.find("RESET_SIM") != std::string::npos) {
+		ClearVentilationFlag();
 		{
 			std::lock_guard <std::mutex> statusLock(m_statusMutex);
 			currentStatus = "NOT RUNNING";
@@ -1231,6 +1233,7 @@ void Manikin::handleServiceCommand(const std::string &value, const std::string &
 void Manikin::handleScenarioCommand(const std::string &value) {
 	if (!value.compare(0, loadScenarioPrefix.size(), loadScenarioPrefix)) {
 		std::string newScenario = value.substr(loadScenarioPrefix.size());
+		ClearVentilationFlag();
 		//		LOG_DEBUG << "Setting scenario: " << newScenario;
 
 		{

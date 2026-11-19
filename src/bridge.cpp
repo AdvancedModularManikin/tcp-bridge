@@ -1,5 +1,6 @@
 #include "bridge.h"
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <sstream>
 #include <stdexcept>
@@ -108,6 +109,16 @@ std::string MapRenderModPayload(const std::string &payload, std::string *mappedT
     return printer.CStr();
 }
 
+static const double VENTILATION_RATE_THRESHOLD = 10;
+static const double VENTILATION_RATE = 16;
+static std::atomic<bool> ventilationActive{false};
+
+void ClearVentilationFlag() {
+    if (ventilationActive.exchange(false)) {
+        LOG_INFO << "Ventilation flag cleared";
+    }
+}
+
 bool BuildVentilationPhysMod(const std::string &renderModPayload, std::string &physModPayload) {
     tinyxml2::XMLDocument doc;
     if (doc.Parse(renderModPayload.c_str()) != tinyxml2::XML_SUCCESS) return false;
@@ -129,10 +140,33 @@ bool BuildVentilationPhysMod(const std::string &renderModPayload, std::string &p
         return false;
     }
 
+    // Rate > 10: start ventilation ONCE at a fixed rate of 16 (regardless of the
+    // requested rate); further rate > 10 messages are ignored until ventilation is
+    // stopped (rate 0) or the flag is cleared by RESET_SIM / LOAD_SCENARIO.
+    // Rate 0: stop ventilation and clear the flag. Anything else: no ventilation mod.
+    double sentRate;
+    const char *state;
+    if (rate > VENTILATION_RATE_THRESHOLD) {
+        if (ventilationActive.exchange(true)) {
+            LOG_DEBUG << "Ventilation already active, ignoring Intubation rate " << rate;
+            return false;
+        }
+        sentRate = VENTILATION_RATE;
+        state = "On";
+    } else if (rate == 0) {
+        ventilationActive = false;
+        sentRate = 0;
+        state = "Off";
+    } else {
+        LOG_DEBUG << "Intubation rate " << rate << " is not > " << VENTILATION_RATE_THRESHOLD
+                  << " and not 0, no ventilation modification sent";
+        return false;
+    }
+
     std::ostringstream out;
     out << "<PhysiologyModification type=\"Ventilation\">"
-        << "<State>" << (rate == 0 ? "Off" : "On") << "</State>"
-        << "<Rate value=\"" << rate << "\" unit=\"1/min\"/>"
+        << "<State>" << state << "</State>"
+        << "<Rate value=\"" << sentRate << "\" unit=\"1/min\"/>"
         << "<InspiratoryExpiratoryRatio>0.5</InspiratoryExpiratoryRatio>"
         << "<PositiveEndExpiredPressure value=\"5\" unit=\"cmH2O\"/>"
         << "<VentilatorPressure value=\"20\" unit=\"cmH2O\"/>"
